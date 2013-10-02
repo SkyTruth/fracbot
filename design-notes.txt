@@ -21,9 +21,9 @@ controller app
 					// task is marked as in progress
 					// update status of all in progress tasks, expire stale tasks, alert on expired tasks
 	completeScrapeTask	// mark a scrape task completed 
-	foundReports	// scraper submits a page of reports scraped from the results page
+	foundReports - fracbot/check-records	// scraper submits a page of reports scraped from the results page
 					// returns the list of reports which are not in the database
-	parsePDF		// scraper sends a PDF which gets stored then parsed
+	parsePDF - fracbot/parse-pdf		// scraper sends a PDF which gets stored then parsed
 					// parsed PDF is returned
 
 
