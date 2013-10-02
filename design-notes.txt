@@ -1,0 +1,70 @@
+FracFoucs Scrape Bot
+Design Notes
+
+
+controller app
+
+	runs on ewn3?
+	provides services to scrapers - greasemonkey scraper and headless (casperjs) scraper
+	publishes status by county to a GME map - need 2 status maps:
+		number of reports in each county
+		time since last scrape for each county 
+
+	services:
+
+	foundStates		// scrapers submit list of states encountered
+					// alert if a new state is found
+	foundCounties	// scrapers submit list of counties found for a state
+					// alert if a new county is found
+	startScrapeTask	// Return a task that needs doing - an entire state, or just one county in a state
+					// use a last completed timestamp to determine which one to do next
+					// task is marked as in progress
+					// update status of all in progress tasks, expire stale tasks, alert on expired tasks
+	completeScrapeTask	// mark a scrape task completed 
+	foundReports	// scraper submits a page of reports scraped from the results page
+					// returns the list of reports which are not in the database
+	parsePDF		// scraper sends a PDF which gets stored then parsed
+					// parsed PDF is returned
+
+
+
+
+HeadlessScraper
+	uses casperjs , phantomjs
+	runs as a cron - kill and restart every hour
+
+	call getScrapeTask - get a scrape task. if no task available then exit
+	send list to foundStates
+	select state in form
+	send list of foundCounties
+	select county in form (optional)
+	submit search form
+	sort by job date
+	for each result page
+		scrape results, send to foundReports
+		for all new reports, download PDF and send to parsePDF 
+	call completeScrapeTask
+	go back around for another task - the cron job will kill it
+
+
+GreaseMonkey Scraper
+	Runs inside the browser
+	requires greasemonkey or tampermonkey
+	on the search form:
+		calls foundStates
+		calls foundCounties
+		adds a "Auto Parse" button which will 
+			call startScrapeTask
+			Perform the search
+			scrape all the result pages
+			call completeScrapeTask
+	
+	On any search result page:
+		calls foundReports
+		adds links to siteinfo on API numbers
+		adds update button for each row that is not in the database
+	On pdf update button click
+		download PDF and send to parsePDF
+		
+		
+			
