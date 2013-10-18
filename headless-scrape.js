@@ -7,7 +7,7 @@
 
 var live = false;          // Use fracbotserver for all operations
 var test_task = false;     // Use fracbotserver for task assignment
-var test_log = true ;      // Send log messages to fracbotserver
+var test_log = false;      // Send log messages to fracbotserver
 var test_update = false;   // Call downloadAllPages to update PDFs to fracbotserver
 
 var fracbot_url = "http://ewn4.skytruth.org/fracbot/";
@@ -85,19 +85,19 @@ var log_message = function(type, msg, data) {
     }
 };
 
-// Tasks for testing
+// Static tasks for testing:
 var static_task = 0;
 var static_params = [
-          { state_name: "Florida",                                },   // No wells in state
+        //{ state_name: "Florida",                                },   // No wells in state
         //{ state_name: "Nebraska",                               },   // Single page state
-          { state_name: "Michigan",                               },   // Single page state
-        //{ state_name: "Alabama",                                },   // Multipage state
-        //{ state_name: "Alaska",                                 },   // Multipage state
-          { state_name: "Virginia",                               },   // 5-page state
+        //{ state_name: "Michigan",                               },   // Single page state
+        //{ state_name: "Alabama",                                },   // 3-page state
+        //{ state_name: "Alaska",                                 },   // 3-page state
+        //{ state_name: "Virginia",                               },   // 6-page state
           { state_name: "Texas",        county_name: "Aransas"    },   // No wells in county
           { state_name: "Oklahoma",     county_name: "Osage"      },   // Single page county
-        //{ state_name: "Colorado",     county_name: "Broomfield" },   // 2 page county
-          { state_name: "Colorado",     county_name: "Larimer"    },   // 3 page county
+          { state_name: "Colorado",     county_name: "Broomfield" },   // 2 page county
+        //{ state_name: "Colorado",     county_name: "Larimer"    },   // 3 page county
         //{ state_name: "Pennsylvania", county_name: "Tioga"      },   // 17 page county
         false,
         ];
@@ -248,8 +248,13 @@ var task_params
 function scrape_loop() {
     // Implements a recursive loop over assigned tasks in the fashion of
     // https://github.com/n1k0/casperjs/blob/master/samples/dynamic.
-    if (task_params) log_message("info", "Task complete", task_params);
-    if (live || test_update) {
+    if (!live && !test_update && this.exists(sel_next_btn)) {
+        // note: live or test_update implies use of downloadAllPages so we don't page here.
+        this.start();
+        page_stacker.call(this);
+        //dump_steps.call(this, 'page stack');
+    } else {
+        if (task_params) log_message("info", "Task complete", task_params);
         this.start(search_url);
         task_params = get_task.call(this);
         if (task_params) {
@@ -257,22 +262,7 @@ function scrape_loop() {
             //dump_steps.call(this, 'task stack');
         } else {
             log_message("info", "Null task assigned.  Exiting.", {});
-            this.exit()
-        }
-    } else {
-        if (this.exists(sel_next_btn)) {
-            this.start();
-            page_stacker.call(this);
-            //dump_steps.call(this, 'page stack');
-        } else {
-            this.start(search_url);
-            task_params = get_task.call(this);
-            if (task_params) {
-                search_stacker.call(this, task_params);
-                //dump_steps.call(this, 'task stack');
-            } else {
-                this.exit()
-            }
+            this.exit(0)
         }
     }
     this.run(scrape_loop);

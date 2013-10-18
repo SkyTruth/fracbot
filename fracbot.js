@@ -176,6 +176,7 @@ function updatePage () {
     $.ajax({
         type: "POST",
         url: fracbotUrl + "/check-records",
+        dataType: "json",
         data: {records: JSON.stringify(parseRows())},
         xhrFields: {
             withCredentials: true
@@ -184,11 +185,13 @@ function updatePage () {
             __utils__.echo('Row status check successful.')
             $("#MainContent_GridView1 tr:not(.PagerStyle):not(:has(th)):not(:has(td[colspan=13]))").map(function (idx, row) {
                 updateRow(row, data[idx]);
-            });
+            }),
             $(document).trigger("pageUpdated");
             console.log("page_is_updated");
         },
-        dataType: "json"
+        error: function(jqXHR, textStatus, errorThrown) {
+            __utils__.echo('Row status check error: ' + jqXHR.status + " " + jqXHR.statusText);
+            }
    });
 }
 
