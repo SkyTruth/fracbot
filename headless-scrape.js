@@ -5,10 +5,10 @@
 // usage:
 //  casperjs headless-scrape.js
 
-var live = false;
-var test_task = false;
-var test_log = false;
-var test_update = true;
+var live = false;          // Use fracbotserver for all operations
+var test_task = false;     // Use fracbotserver for task assignment
+var test_log = true ;      // Send log messages to fracbotserver
+var test_update = false;   // Call downloadAllPages to update PDFs to fracbotserver
 
 var fracbot_url = "http://ewn4.skytruth.org/fracbot/";
 var search_url = 'http://www.fracfocusdata.org/DisclosureSearch/';
@@ -88,13 +88,16 @@ var log_message = function(type, msg, data) {
 // Tasks for testing
 var static_task = 0;
 var static_params = [
-        //{ state_name: "Florida",                                },   // No wells in state
+          { state_name: "Florida",                                },   // No wells in state
         //{ state_name: "Nebraska",                               },   // Single page state
+          { state_name: "Michigan",                               },   // Single page state
         //{ state_name: "Alabama",                                },   // Multipage state
-        //{ state_name: "Texas",        county_name: "Aransas"    },   // No wells in county
-        //{ state_name: "Oklahoma",     county_name: "Osage"      },   // Single page county
+        //{ state_name: "Alaska",                                 },   // Multipage state
+          { state_name: "Virginia",                               },   // 5-page state
+          { state_name: "Texas",        county_name: "Aransas"    },   // No wells in county
+          { state_name: "Oklahoma",     county_name: "Osage"      },   // Single page county
         //{ state_name: "Colorado",     county_name: "Broomfield" },   // 2 page county
-        { state_name: "Colorado",     county_name: "Larimer"    },   // 3 page county
+          { state_name: "Colorado",     county_name: "Larimer"    },   // 3 page county
         //{ state_name: "Pennsylvania", county_name: "Tioga"      },   // 17 page county
         false,
         ];
@@ -127,26 +130,52 @@ function get_task() {
     return params;
 }
 
-// This is a crude mechanism to signal from browser to casper.
-// In the browser we log a message.  
-// Event code in the client space reads log messages 
-// looking for specific text and sets a flag when observed.
+// This is a mechanism to signal from browser to casper.
+// In the browser we log a message with key text.  
+// Event code in the casper space reads log messages 
+// looking for the key text and sets a flag when observed.
+// The waitFor function wraps the whole thing is a parameterless
+// function that also resets the flag.
 var all_pages_done = false;
 casper.on('remote.message', function on_msg(msg) {
     if (msg == 'all_pages_done') {all_pages_done=true;}
 });
+function waitForAllPagesDone() {
+    this.waitFor( function check_all_pages_done() {
+        if (all_pages_done) {
+            this.echo("All pages are done.");
+            all_pages_done = false;
+            return true;
+        }
+        return false;
+    }, null, null, 3600000);    // give it an hour to complete all pages.
+}
+// Another console.log signal from browser space.
+var page_is_updated = false;
+casper.on('remote.message', function on_msg(msg) {
+    if (msg == 'page_is_updated') {page_is_updated=true;}
+});
+function waitForPageUpdate() {
+    this.waitFor( function check_page_update() {
+        if (page_is_updated) {
+            this.echo("Page is updated.");
+            page_is_updated = false;
+            return true;
+        }
+        return false;
+    });
+}
+
 function scrape_page() {
     if (live || test_update) {
         log_message('debug', 'Passing search results to fracbot.');
-        var casper_all_pages_done = false;
         this.evaluate( function all_pages() {
             downloadAllPages(function finish_cb() {
                 console.log("all_pages_done")
             });
         });
-        this.waitFor( function check_all_pages() {
-            return all_pages_done;
-        },null,null,600000);
+
+        waitForAllPagesDone.call(this);
         this.then( function(){log_message('info', 'Download complete.');});
     } else {
         var rows = this.evaluate( function one_page() {
@@ -193,10 +222,11 @@ function search_stacker(params) {
         this.click(sel_search_btn);
     });
 
-    this.waitForUrl(results_url)
+    this.waitForUrl(results_url);
+    waitForPageUpdate.call(this);
 
-    this.then(function scrape_first() {
-        this.echo('Scraping first page');
+    this.then(function scrape_pages() {
+        this.echo('Scraping pages');
         scrape_page.call(this);
     });
 }
@@ -214,19 +244,35 @@ function page_stacker() {
     });
 }
 
+var task_params
 function scrape_loop() {
-    if (this.exists(sel_next_btn)) {
-        this.start();
-        page_stacker.call(this);
-        //dump_steps.call(this, 'page stack');
-    } else {
+    // Implements a recursive loop over assigned tasks in the fashion of
+    // https://github.com/n1k0/casperjs/blob/master/samples/dynamic.
+    if (task_params) log_message("info", "Task complete", task_params);
+    if (live || test_update) {
         this.start(search_url);
         task_params = get_task.call(this);
         if (task_params) {
             search_stacker.call(this, task_params);
             //dump_steps.call(this, 'task stack');
         } else {
+            log_message("info", "Null task assigned.  Exiting.", {});
             this.exit()
+        }
+    } else {
+        if (this.exists(sel_next_btn)) {
+            this.start();
+            page_stacker.call(this);
+            //dump_steps.call(this, 'page stack');
+        } else {
+            this.start(search_url);
+            task_params = get_task.call(this);
+            if (task_params) {
+                search_stacker.call(this, task_params);
+                //dump_steps.call(this, 'task stack');
+            } else {
+                this.exit()
+            }
         }
     }
     this.run(scrape_loop);
