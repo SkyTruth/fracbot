@@ -11,7 +11,10 @@ var test_log = false;      // Send log messages to fracbotserver
 var test_update = false;   // Call downloadAllPages to update PDFs to fracbotserver
 
 var fracbot_url = "http://ewn4.skytruth.org/fracbot/";
-var search_url = 'http://www.fracfocusdata.org/DisclosureSearch/';
+var fracbot_js_url = fracbot_url+'fracbot.user.js';
+var fracbot_task_url = fracbot_url+'task';
+var fracbot_log_url = fracbot_url+'client-log';
+var search_url = 'http://www.fracfocusdata.org/DisclosureSearch/StandardSearch.aspx';
 var results_url = '/DisclosureSearch/SearchResults.aspx';
 var sel_state_list = "#MainContent_cboStateList";
 var sel_county_list = "#MainContent_cboCountyList";
@@ -27,7 +30,7 @@ if (live) {
         log_level:'info',
         waitTimeout:30000,
         remoteScripts: [
-            'http://ewn4.skytruth.org/fracbot/fracbot.user.js'
+            fracbot_js_url 
         ]});
 } else {
     var casper = require('casper').create({
@@ -61,16 +64,15 @@ var log_message = function(type, msg, data) {
         var logargs = {'activity_type':type,
                        'info':JSON.stringify(logdata)
                       };
-        err = casper.evaluate( function log(args) {
+        err = casper.evaluate( function log(log_url, args) {
             var data = JSON.stringify(args);
-            //var data = args
             try {
-                __utils__.sendAJAX("http://ewn4.skytruth.org/fracbot/client-log", 'POST', data, true);
+                __utils__.sendAJAX(log_url, 'POST', data, true);
                 return null
             } catch(err) {
                 return err;
             }
-        }, logargs);
+        }, fracbot_log_url, logargs);
         if (err) {
             casper.echo('Logging error:');
             utils.dump(err);
@@ -104,14 +106,14 @@ var static_params = [
 
 function get_task() {
     if (live || test_task) {
-        params = this.evaluate( function task() {
+        params = this.evaluate( function task(task_url) {
             try {
                 return JSON.parse(
-                        __utils__.sendAJAX("http://ewn4.skytruth.org/fracbot/task", 'GET', null, false));
+                        __utils__.sendAJAX(task_url, 'GET', null, false));
             } catch(err) {
                 return {'error': err};
             }
-        });
+        }, fracbot_task_url);
     } else {
         params = static_params[static_task];
         static_task += 1;
@@ -295,19 +297,31 @@ casper.once("page.error", function(msg, trace) {
     log_message("error", logmsg, logdata);
 });
 
+casper.on('timeout', function(){
+    log_message('error', "script execution timeout.");
+});
+casper.on('step.timeout', function(){
+    log_message('error', "navigation step timeout.");
+});
 casper.on("waitFor.timeout", function(){
     log_message('error', "wait* operation timeout.");
 });
+
 casper.on('resource.received', function(resource) {
-    logmsg = "Resource received from "+url;
+    logmsg = "Resource received from "+resource.url;
     logdata = {'url':resource.url,
                'status':resource.status,
                'statusText':resource.statusText,
               };
     if (resource.status > 399) {
-        log_message("error", logmsg, logdata);
+        // logging error on log url can lead to infinite loop.
+        if (resource.url != fracbot_log_url) {
+            log_message("error", logmsg, logdata);
+        } else {
+            utils.dump(logdata)
+        }
     } else {
-        log_message("debug", logmsg, logdata);
+        //log_message("debug", logmsg, logdata);  // dumps too much stuff
     }
 });
 casper.on('navigation.requested', function(url, navigationType, navigationLocked, isMainFrame) {
