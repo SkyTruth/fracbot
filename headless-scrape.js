@@ -5,7 +5,8 @@
 // usage:
 //  casperjs headless-scrape.js
 
-var live = false;          // Use fracbotserver for all operations
+// Production configuration is live=true, test_xxx = false.
+var live = false;         // Use fracbotserver for all operations
 var test_task = true;     // Use fracbotserver for task assignment
 var test_log = true;      // Send log messages to fracbotserver
 var test_update = true;   // Call downloadAllPages to update PDFs to fracbotserver
@@ -16,8 +17,6 @@ var fracbot_task_url = fracbot_url+'task';
 var fracbot_log_url = fracbot_url+'client-log';
 var search_url = 'http://www.fracfocusdata.org/DisclosureSearch/StandardSearch.aspx';
 var results_url = '/DisclosureSearch/SearchResults.aspx';
-//var sel_state_list = "#MainContent_cboStateList";
-//var sel_county_list = "#MainContent_cboCountyList";
 var sel_search_btn = "#MainContent_btnSearch";
 var sel_next_btn = "input#MainContent_GridView1_ButtonNext";
 var sel_page_num = "input#MainContent_GridView1_PageCurrent";
@@ -25,9 +24,10 @@ var sel_page_num = "input#MainContent_GridView1_PageCurrent";
 var utils = require('utils');
 var xpath = require('casper').selectXPath;
 
-// skip_task is used after a timeout
+// Create casper object
+// skip_task and timeout_counts are used in response to timeout events.
 var skip_task = false;
-
+var timeout_count = 0;
 if (live) {
     var casper = require('casper').create({
         verbose:false,
@@ -35,6 +35,7 @@ if (live) {
         waitTimeout:120000,
         onWaitTimeout: function(){
             log_message('error', 'Request timeout.');
+            timeout_count += 1;
             wait(10000);
             skip_task = true;
             },
@@ -48,6 +49,7 @@ if (live) {
         waitTimeout:120000,
         onWaitTimeout: function(){
             log_message('error', 'Request timeout.');
+            timeout_count += 1;
             wait(10000);
             skip_task = true;
             },
@@ -80,7 +82,6 @@ var log_message = function(type, msg, data) {
                        'info':JSON.stringify(logdata)
                       };
         err = casper.evaluate( function log(log_url, args) {
-            var data = JSON.stringify(args);
             try {
                 __utils__.sendAJAX(log_url, 'POST', args, true);
                 return null
@@ -96,7 +97,7 @@ var log_message = function(type, msg, data) {
         }
     }
     if ( !live || test_log) {
-        if (JSON.stringify(data) != '{}') {
+        if (data.toString() != '{}') {
             logdata.data = data;
         }
         casper.echo(type+':');
@@ -104,18 +105,79 @@ var log_message = function(type, msg, data) {
     }
 };
 
-// lifetime management
+// Lifetime management
 var lifetime = casper.cli.options.lifetime;
-casper.echo("Setting lifetime to "+lifetime+" minutes.");
-casper.echo("Setting lifetime to "+lifetime*60000+"ms.");
+//casper.echo("Setting lifetime to "+lifetime+" minutes.");
+//casper.echo("Setting lifetime to "+lifetime*60000+"ms.");
 if (typeof lifetime != 'undefined') {
-    //log_message("info", "Setting lifetime for "+lifetime+" minutes.");
     var lifetimer = setInterval(
         function () {
-            log_message("info", "Lifetime has expired.");
-            casper.exit(0);
+            headless_exit(0, "Lifetime has expired.");
         },
         lifetime*60000); 
+}
+
+// Browser events
+// This is a mechanism to signal from browser to casper.
+// In the browser we log a console message with key text.  
+// Here, event code reads log messages looking for the key text
+// and sets a flag or increments a count when observed.
+var all_pages_done = false;
+var page_is_updated = false;
+var upload_success = 0;
+var upload_success_total = 0;
+var upload_error = 0;
+var upload_error_total = 0;
+casper.on('remote.message', function on_msg(msg) {
+    if (msg == 'all_pages_done') {all_pages_done=true;}
+    if (msg == 'page_is_updated') {page_is_updated=true;}
+    if (msg == 'pdf_upload_success') {
+        upload_success += 1;
+        upload_success_total += 1;
+    }
+    if (msg == 'pdf_upload_error') {
+        upload_error += 1;
+        upload_error_total += 1;
+    }
+});
+// The waitFor functions wrap the flag operations in a parameterless
+// function that also resets the flag.
+function waitForAllPagesDone() {
+    this.waitFor( function check_all_pages_done() {
+        if (all_pages_done) {
+            //this.echo("All pages are done.");
+            all_pages_done = false;
+            return true;
+        }
+        return false;
+    }, null, null, 3600000);    // give it an hour to complete all pages.
+}
+function waitForPageUpdate() {
+    this.waitFor( function check_page_update() {
+        if (page_is_updated) {
+            //this.echo("Page is updated.");
+            page_is_updated = false;
+            return true;
+        }
+        return false;
+    });
+}
+
+// Common exit function
+var headless_exit = function(val, msg) {
+    if (val!=0) {
+        msg_type = 'error';
+    }else{
+        msg_type = 'info';
+    }
+    log_message(msg_type, 'Ending headless scraper job.', 
+                { 'exit_msg': msg,
+                  'job_end_time': new Date().toString(),
+                  'upload_success_total': upload_success_total.toString(),
+                  'upload_error_total': upload_error_total.toString(),
+                  'search_timeouts': timeout_count.toString()
+                })
+    casper.exit(val);
 }
 
 // Static tasks for testing:
@@ -150,6 +212,7 @@ function get_task() {
         static_task += 1;
     }
     if (params) {
+        params.task_start_time = new Date().toString();
         if (params.error) {
             log_message("error", "Task ajax error: " + params.error.message, params.error);
             params = false;
@@ -163,42 +226,6 @@ function get_task() {
     return params;
 }
 
-// This is a mechanism to signal from browser to casper.
-// In the browser we log a message with key text.  
-// Event code in the casper space reads log messages 
-// looking for the key text and sets a flag when observed.
-// The waitFor function wraps the whole thing is a parameterless
-// function that also resets the flag.
-var all_pages_done = false;
-casper.on('remote.message', function on_msg(msg) {
-    if (msg == 'all_pages_done') {all_pages_done=true;}
-});
-function waitForAllPagesDone() {
-    this.waitFor( function check_all_pages_done() {
-        if (all_pages_done) {
-            this.echo("All pages are done.");
-            all_pages_done = false;
-            return true;
-        }
-        return false;
-    }, null, null, 3600000);    // give it an hour to complete all pages.
-}
-// Another console.log signal from browser space.
-var page_is_updated = false;
-casper.on('remote.message', function on_msg(msg) {
-    if (msg == 'page_is_updated') {page_is_updated=true;}
-});
-function waitForPageUpdate() {
-    this.waitFor( function check_page_update() {
-        if (page_is_updated) {
-            this.echo("Page is updated.");
-            page_is_updated = false;
-            return true;
-        }
-        return false;
-    });
-}
-
 function scrape_page() {
     if (live || test_update) {
         log_message('debug', 'Passing search results to fracbot.');
@@ -209,7 +236,7 @@ function scrape_page() {
         });
 
         waitForAllPagesDone.call(this);
-        this.then( function(){log_message('info', 'Download complete.');});
+        this.then( function(){log_message('debug', 'Download complete.');});
     } else {
         var rows = this.evaluate( function one_page() {
             return parseRows();
@@ -222,7 +249,8 @@ function search_stacker(params) {
     this.then( function state() {
         state_num = this.getElementAttribute(
                 xpath("//select[@id='MainContent_cboStateList']/option[.='"+params.state_name+"']"), 'value');
-        this.echo('Selecting state ' + params.state_name + " (" + state_num + ")");
+        params.state_api_num = state_num
+        //this.echo('Selecting state ' + params.state_name + " (" + state_num + ")");
         this.evaluate( function set_state(state) {
             jQuery("#MainContent_cboStateList").val(state);
             jQuery("#MainContent_cboStateList").trigger("change");
@@ -238,7 +266,8 @@ function search_stacker(params) {
             county_num = this.getElementAttribute(
                     xpath("//select[@id='MainContent_cboCountyList']/option[.='"+params.county_name+"']"),
                     'value');
-            this.echo('Selecting county ' + params.county_name + ' (' + county_num + ')');
+            params.county_api_num = county_num
+            //this.echo('Selecting county ' + params.county_name + ' (' + county_num + ')');
             this.evaluate( function set_county(county) {
                 jQuery("#MainContent_cboCountyList").val(county);
                 jQuery("#MainContent_cboCountyList").trigger("change");
@@ -251,7 +280,7 @@ function search_stacker(params) {
     }
 
     this.then(function submit() {
-        this.echo('Submitting the search ');
+        log_message('debug', "Submit search", params)
         this.click(sel_search_btn);
     });
 
@@ -259,7 +288,7 @@ function search_stacker(params) {
     waitForPageUpdate.call(this);
 
     this.then(function scrape_pages() {
-        this.echo('Scraping pages');
+        //this.echo('Scraping pages');
         scrape_page.call(this);
     });
 }
@@ -282,29 +311,35 @@ function scrape_loop() {
     // Implements a recursive loop over assigned tasks in the fashion of
     // https://github.com/n1k0/casperjs/blob/master/samples/dynamic.
     if ( !skip_task && !live && !test_update && this.exists(sel_next_btn)) {
-        // note: live or test_update implies use of downloadAllPages so we don't page here.
+        // note: 'live' or 'test_update' implies use of downloadAllPages
+        //       so we don't page here.
         this.start();
         page_stacker.call(this);
         //dump_steps.call(this, 'page stack');
     } else {
+        // Finish old task
         if (task_params)  {
+            task_params.upload_success = upload_success;
+            task_params.upload_error = upload_error;
+            task_params.task_end_time = new Date().toString();
             if (skip_task) {
                 log_message("info", "Task failed -- request timed out.", task_params);
             } else {
                 log_message("info", "Task complete", task_params);
             }
         }
-        skip_task = false
+        // Start a new task
+        skip_task = false;
+        upload_success = 0;
+        upload_error = 0;
         this.start(search_url);
-        if (!skip_task) {
-            task_params = get_task.call(this);
-            if (task_params) {
-                search_stacker.call(this, task_params);
-                //dump_steps.call(this, 'task stack');
-            } else {
-                log_message("info", "Null task assigned.  Exiting.", {});
-                this.exit(0)
-            }
+        if (skip_task) headless_exit(1, "Timeout on request for search page.");
+        task_params = get_task.call(this);
+        if (task_params) {
+            search_stacker.call(this, task_params);
+            //dump_steps.call(this, 'task stack');
+        } else {
+            headless_exit(0, "Null task assigned.");
         }
     }
     this.run(scrape_loop);
@@ -312,8 +347,9 @@ function scrape_loop() {
 
 casper.start();
 casper.then( function() {
-    this.echo('Starting Scrape');
-    log_message("info", "Set lifetime for "+lifetime+" minutes.");
+    log_message("info", "Starting headless scraper job.",
+        {"job_start_time": new Date().toString(),
+         "job_lifetime": lifetime.toString()+" minutes"});
 });
 casper.run(scrape_loop);
 
