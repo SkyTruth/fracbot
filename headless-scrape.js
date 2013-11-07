@@ -6,9 +6,9 @@
 //  casperjs headless-scrape.js
 
 var live = false;          // Use fracbotserver for all operations
-var test_task = false;     // Use fracbotserver for task assignment
-var test_log = false;      // Send log messages to fracbotserver
-var test_update = false;   // Call downloadAllPages to update PDFs to fracbotserver
+var test_task = true;     // Use fracbotserver for task assignment
+var test_log = true;      // Send log messages to fracbotserver
+var test_update = true;   // Call downloadAllPages to update PDFs to fracbotserver
 
 var fracbot_url = "http://ewn4.skytruth.org/fracbot/";
 var fracbot_js_url = fracbot_url+'fracbot.user.js';
@@ -16,19 +16,28 @@ var fracbot_task_url = fracbot_url+'task';
 var fracbot_log_url = fracbot_url+'client-log';
 var search_url = 'http://www.fracfocusdata.org/DisclosureSearch/StandardSearch.aspx';
 var results_url = '/DisclosureSearch/SearchResults.aspx';
-var sel_state_list = "#MainContent_cboStateList";
-var sel_county_list = "#MainContent_cboCountyList";
+//var sel_state_list = "#MainContent_cboStateList";
+//var sel_county_list = "#MainContent_cboCountyList";
 var sel_search_btn = "#MainContent_btnSearch";
 var sel_next_btn = "input#MainContent_GridView1_ButtonNext";
 var sel_page_num = "input#MainContent_GridView1_PageCurrent";
 
 var utils = require('utils');
 var xpath = require('casper').selectXPath;
+
+// skip_task is used after a timeout
+var skip_task = false;
+
 if (live) {
     var casper = require('casper').create({
         verbose:false,
         log_level:'info',
-        waitTimeout:30000,
+        waitTimeout:120000,
+        onWaitTimeout: function(){
+            log_message('error', 'Request timeout.');
+            wait(10000);
+            skip_task = true;
+            },
         remoteScripts: [
             fracbot_js_url 
         ]});
@@ -36,10 +45,16 @@ if (live) {
     var casper = require('casper').create({
         verbose:true,
         log_level:'debug',
-        waitTimeout:30000,
+        waitTimeout:120000,
+        onWaitTimeout: function(){
+            log_message('error', 'Request timeout.');
+            wait(10000);
+            skip_task = true;
+            },
         clientScripts: [
             'fracbot.js'
-        ]});
+        ]
+        });
 }
 
 // debug routine, dump the stacked casper steps
@@ -54,7 +69,7 @@ function dump_steps(msg) {
 // Logging function to send messages and events back to server.
 // See event loggers at the end of this file.
 var log_message = function(type, msg, data) {
-    if (type == '') {  // used to exclude debug messages, etc.
+    if (live && type == 'debug') {
         return
     }
     if (typeof data == 'undefined') { data = {}; }
@@ -67,7 +82,7 @@ var log_message = function(type, msg, data) {
         err = casper.evaluate( function log(log_url, args) {
             var data = JSON.stringify(args);
             try {
-                __utils__.sendAJAX(log_url, 'POST', data, true);
+                __utils__.sendAJAX(log_url, 'POST', args, true);
                 return null
             } catch(err) {
                 return err;
@@ -76,6 +91,8 @@ var log_message = function(type, msg, data) {
         if (err) {
             casper.echo('Logging error:');
             utils.dump(err);
+            casper.echo(type+':');
+            utils.dump(logdata);
         }
     }
     if ( !live || test_log) {
@@ -86,6 +103,20 @@ var log_message = function(type, msg, data) {
         utils.dump(logdata);
     }
 };
+
+// lifetime management
+var lifetime = casper.cli.options.lifetime;
+casper.echo("Setting lifetime to "+lifetime+" minutes.");
+casper.echo("Setting lifetime to "+lifetime*60000+"ms.");
+if (typeof lifetime != 'undefined') {
+    //log_message("info", "Setting lifetime for "+lifetime+" minutes.");
+    var lifetimer = setInterval(
+        function () {
+            log_message("info", "Lifetime has expired.");
+            casper.exit(0);
+        },
+        lifetime*60000); 
+}
 
 // Static tasks for testing:
 var static_task = 0;
@@ -250,21 +281,30 @@ var task_params
 function scrape_loop() {
     // Implements a recursive loop over assigned tasks in the fashion of
     // https://github.com/n1k0/casperjs/blob/master/samples/dynamic.
-    if (!live && !test_update && this.exists(sel_next_btn)) {
+    if ( !skip_task && !live && !test_update && this.exists(sel_next_btn)) {
         // note: live or test_update implies use of downloadAllPages so we don't page here.
         this.start();
         page_stacker.call(this);
         //dump_steps.call(this, 'page stack');
     } else {
-        if (task_params) log_message("info", "Task complete", task_params);
+        if (task_params)  {
+            if (skip_task) {
+                log_message("info", "Task failed -- request timed out.", task_params);
+            } else {
+                log_message("info", "Task complete", task_params);
+            }
+        }
+        skip_task = false
         this.start(search_url);
-        task_params = get_task.call(this);
-        if (task_params) {
-            search_stacker.call(this, task_params);
-            //dump_steps.call(this, 'task stack');
-        } else {
-            log_message("info", "Null task assigned.  Exiting.", {});
-            this.exit(0)
+        if (!skip_task) {
+            task_params = get_task.call(this);
+            if (task_params) {
+                search_stacker.call(this, task_params);
+                //dump_steps.call(this, 'task stack');
+            } else {
+                log_message("info", "Null task assigned.  Exiting.", {});
+                this.exit(0)
+            }
         }
     }
     this.run(scrape_loop);
@@ -273,6 +313,7 @@ function scrape_loop() {
 casper.start();
 casper.then( function() {
     this.echo('Starting Scrape');
+    log_message("info", "Set lifetime for "+lifetime+" minutes.");
 });
 casper.run(scrape_loop);
 

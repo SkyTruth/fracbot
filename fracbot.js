@@ -33,7 +33,7 @@ function downloadRow(row, cb) {
 
     $(row).find(".update").html('Downloading..');
     if (top.document.autoupdate != undefined) top.document.autoupdate.updateStatus({msg: "Downloading..."});
-    __utils__.echo('downloading pdf.')
+    //__utils__.echo('downloading pdf.')
     $.ajax({
         url: theForm.action,
         type: "POST",
@@ -55,7 +55,7 @@ function downloadRow(row, cb) {
             globalTextStatus = textStatus;
             globalJqXHR = jqXHR;
         
-            __utils__.echo('uploading pdf.')
+            //__utils__.echo('uploading pdf.')
             $.ajax({
                 url: fracbotUrl + "/parse-pdf",
                 type: "POST",
@@ -70,7 +70,7 @@ function downloadRow(row, cb) {
                     if (cb) cb(data);
                 },
                 error: function(jqXHR, textStatus, errorThrown) {
-                    __utils__.echo('upload error: ' + jqXHR.status + " " + jqXHR.statusText)
+                    //__utils__.echo('upload error: ' + jqXHR.status + " " + jqXHR.statusText)
                     $(row).find(".update").html('Failed :(');
                     if (top.document.autoupdate != undefined) top.document.autoupdate.updateStatus({failed: 1, msg: "Failed :("});
                     if (cb) cb();
@@ -79,7 +79,7 @@ function downloadRow(row, cb) {
             });
         },
         error: function(jqXHR, textStatus, errorThrown) {
-            __utils__.echo('download error: ' + jqXHR.status + " " + jqXHR.statusText)
+            //__utils__.echo('download error: ' + jqXHR.status + " " + jqXHR.statusText)
             $(row).find(".update").html('Failed :(');
             if (cb) cb();
         },
@@ -89,7 +89,7 @@ function downloadRow(row, cb) {
 function downloadRows(cb) {
     var rows = $("#MainContent_GridView1 tr:not(.PagerStyle):has(td.isnew)");
     var idx = -1;
-    __utils__.echo('downloadRows: '+rows.length+' rows.')
+    //__utils__.echo('downloadRows: '+rows.length+' rows.')
     var next = function() {
         idx++;
         if (idx < rows.length) {
@@ -102,9 +102,9 @@ function downloadRows(cb) {
 }
 
 function downloadAllPages(cb) {
-    __utils__.echo('downloadAllPages entered.')
+    //__utils__.echo('downloadAllPages entered.')
     var downloadOneMorePage = function () {
-        __utils__.echo('downloadOneMorePage entered.')
+        //__utils__.echo('downloadOneMorePage entered.')
         downloadRows(function () {
             var next = $("#MainContent_GridView1_ButtonNext");
             if (next.length > 0) {
@@ -114,7 +114,7 @@ function downloadAllPages(cb) {
                 if (cb) {
                     setTimeout(cb, downloadAllPagesTimeout);
                 } else {
-                    __utils__.echo("Done downloading all pages");
+                    //__utils__.echo("Done downloading all pages");
                     console.log("Done downloading all pages");
                 }
             }
@@ -172,7 +172,7 @@ function updatePage () {
     $("#MainContent_GridView1 tr:not(.PagerStyle):has(th)").prepend(header);
     $("#MainContent_GridView1 tr:not(.PagerStyle):not(:has(th))").prepend("<td class='update'></td>")
    
-    __utils__.echo('updatePage: Checking row status.')
+    //__utils__.echo('updatePage: Checking row status.')
     $.ajax({
         type: "POST",
         url: fracbotUrl + "/check-records",
@@ -182,7 +182,7 @@ function updatePage () {
             withCredentials: true
         },
         success: function (data, textStatus, jqXHR) {
-            __utils__.echo('Row status check successful.')
+            //__utils__.echo('Row status check successful.')
             $("#MainContent_GridView1 tr:not(.PagerStyle):not(:has(th)):not(:has(td[colspan=13]))").map(function (idx, row) {
                 updateRow(row, data[idx]);
             }),
@@ -190,13 +190,12 @@ function updatePage () {
             console.log("page_is_updated");
         },
         error: function(jqXHR, textStatus, errorThrown) {
-            __utils__.echo('Row status check error: ' + jqXHR.status + " " + jqXHR.statusText);
+            //__utils__.echo('Row status check error: ' + jqXHR.status + " " + jqXHR.statusText);
             }
    });
 }
 
 function mangleResultsPage() {
-    __utils__.echo('mangleResultsPage entered')
     var btn = $("<a href='javascript:void(0);' class='BackToFilterButton'>Automatically update everything</a>");
     btn.click(downloadAllPages);
     $(".BackToFilterBox").append(btn);
