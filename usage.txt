@@ -1,0 +1,10 @@
+
+casperjs 
+        --web-security=no 
+        --proxy=<ip>:<port>
+        --proxy_type=<http|socks>
+    headless-scrape.js
+        --ip=<proxy ip>
+        --id=<client identifier>
+        --lifetime=<minutes to execute>
+
