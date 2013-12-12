@@ -30,6 +30,7 @@ var xpath = require('casper').selectXPath;
 // skip_task and timeout_counts are used in response to timeout events.
 var skip_task = false;
 var timeout_count = 0;
+var timeout_total = 0;
 if (live) {
     verbose = false;
     log_level = 'info';
@@ -49,10 +50,11 @@ if (live) {
 var casper = require('casper').create({
         verbose: verbose,
         log_level: log_level,
-        waitTimeout: 120000,
+        waitTimeout: 180000,
         onWaitTimeout: function () {
-            log_message('error', 'Abort: Request timeout.');
+            log_message('error', 'Error: Request timeout.');
             timeout_count += 1;
+            timeout_total += 1;
             skip_task = true;
             wait(10000);
         },
@@ -261,9 +263,6 @@ var headless_exit = function (val, msg) {
         'upload_error_total': upload_error_total,
         'search_timeouts': timeout_count
     });
-    //casper.echo('Browser Cookie: ' + casper.evaluate(function () {
-    //    return document.cookie;
-    //}));
 
     casper.exit(val);
 };
@@ -423,7 +422,11 @@ var task_params;
             scrape_page.call(this);
         });
         this.then(function () {
-            if (skip_task) { headless_exit(14, "Error when scraping pages."); }
+            if (skip_task) {
+                //headless_exit(14, "Error when scraping pages.");
+                // Continue on pdf scrape error.
+                skip_task = false;
+            }
         });
     }
 
@@ -455,6 +458,7 @@ var task_params;
             if (task_params) {
                 task_params.upload_success = upload_success;
                 task_params.upload_error = upload_error;
+                task_params.timeout_count = timeout_count;
                 task_params.task_end_time = new Date().toString();
                 if (skip_task) {
                     log_message("info", "Task failed -- request timed out.",
@@ -467,6 +471,7 @@ var task_params;
             }
             // Start a new task
             skip_task = false;
+            timeout_count = 0;
             upload_success = 0;
             upload_error = 0;
             this.start(search_url);
@@ -520,28 +525,4 @@ casper.on('timeout', function () {
 casper.on('step.timeout', function () {
     log_message('error', "navigation step timeout.");
 });
-
-//casper.on('navigation.requested', function (url, navigationType,
-//    navigationLocked, isMainFrame) {
-//    logmsg = "Navigation requested to " + url;
-//    logdata = {
-//        'url': url,
-//        'type': navigationType,
-//        'locked': navigationLocked,
-//        'mainFrame': isMainFrame
-//    };
-//    //log_message("debug", logmsg, logdata);  // Too much output
-//});
-
-//casper.on('step.added', function (status) {
-//    logmsg = "Casper step added. " + status.substring(0, 80);
-//    logdata = {
-//        'status': status
-//    };
-//    log_message("debug", logmsg, logdata);
-//});
-
-//casper.on('entry', function (status) {
-//    log_message(entry.level, entry.message, entry);
-//});
 
