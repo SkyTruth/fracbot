@@ -1,73 +1,69 @@
-// Dependencies
-// http://phantomjs.org/
-// http://casperjs.org/
+// dependencies
+//      http://phantomjs.org/
+//      http://casperjs.org/
 // usage:
-//  casperjs headless-scrape.js
-// Production configuration is live=true, test_xxx = false.
-// If all test_xxx are true (and live=false) the result is 
-// identical to live=true but with debug output.
-var live = false; // Use fracbotserver for all operations
-var test_fbot_js = true;  // Use fracbot.js from fracbotserver.
-var test_task = true; // Use fracbotserver for task assignment
-var test_log = true; // Send log messages to fracbotserver
-var test_update = true; // Call downloadAllPages to update PDFs to fracbotserver
+//      casperjs [--web-security=no] headless-scrape.js
 
+// Configuration flags
+// Production configuration is live=true, others=false.
+var live = true; // Post log and pdfs to fracbot server
+var debug_output = true; // Produces more logging records.
+var local_fracbot = false; // Use local copy of fracbot.js (for debug)
+var local_tasking = false; // Use internal array of tasks (for debug)
+
+// URLs
 var fracbot_url = "http://ewn4.skytruth.org/fracbot/";
 var fracbot_js_url = fracbot_url + 'fracbot.user.js';
 var fracbot_task_url = fracbot_url + 'task';
 var fracbot_log_url = fracbot_url + 'client-log';
 var search_url =
     'http://www.fracfocusdata.org/DisclosureSearch/StandardSearch.aspx';
+var bot_warning_url =
+    'http://www.fracfocusdata.org/DisclosureSearch/BotWarning.aspx';
 var results_url = '/DisclosureSearch/SearchResults.aspx';
-var sel_search_btn = "#MainContent_btnSearch";
-var sel_next_btn = "input#MainContent_GridView1_ButtonNext";
-var sel_page_num = "input#MainContent_GridView1_PageCurrent";
 
 var utils = require('utils');
 var xpath = require('casper').selectXPath;
 
-// Create casper object
-// skip_task and timeout_counts are used in response to timeout events.
+// Execution control flags used in response to timeout events, etc.
 var skip_task = false;
 var timeout_count = 0;
-var timeout_total = 0;
-if (live) {
-    verbose = false;
-    log_level = 'info';
+var timeout_count_total = 0;
+
+// Create casper object
+if (local_fracbot) {
+    clientScripts = ['fracbot.js'];
+    remoteScripts = [];
+} else {
     clientScripts = [];
     remoteScripts = [fracbot_js_url];
-} else {
+}
+if (debug_output) {
     verbose = true;
     log_level = 'debug';
-    if (test_fbot_js) {
-        clientScripts = [];
-        remoteScripts = [fracbot_js_url];
-    } else {
-        clientScripts = ['fracbot.js'];
-        remoteScripts = [];
-    }
+} else {
+    verbose = false;
+    log_level = 'info';
 }
-var casper = require('casper').create({
-        verbose: verbose,
-        log_level: log_level,
-        waitTimeout: 180000,
-        onWaitTimeout: function () {
-            log_message('error', 'Error: Request timeout.');
-            timeout_count += 1;
-            timeout_total += 1;
-            skip_task = true;
-            wait(10000);
-        },
-        remoteScripts: remoteScripts,
-        clientScripts: clientScripts,
-        pageSettings: {
-            'userAgent': 'Mozilla/5.0 (Windows NT 6.1; rv:25.0) Gecko/20100101 Firefox/25.0',
-            'localToRemoteUrlAccessEnabled': true
-        }
-});
 
-// set user agent
-// casper.userAgent('Mozilla/5.0 (Windows NT 6.1; rv:25.0) Gecko/20100101 Firefox/25.0');
+var casper = require('casper').create({
+    verbose: verbose,
+    log_level: log_level,
+    waitTimeout: 180000,
+    onWaitTimeout: function () {
+        log_message('error', 'Error: Request timeout.');
+        timeout_count += 1;
+        timeout_count_total += 1;
+        skip_task = true;
+        wait(10000);
+    },
+    remoteScripts: remoteScripts,
+    clientScripts: clientScripts,
+    pageSettings: {
+        'userAgent': 'Mozilla/5.0 (Windows NT 6.1; rv:25.0) Gecko/20100101 Firefox/25.0',
+        'localToRemoteUrlAccessEnabled': true
+    }
+});
 
 // Tests for errors on receipt of resources.
 casper.on('resource.received', function (resource) {
@@ -122,10 +118,7 @@ function dump_steps(msg) {
 // Logging function to send messages and events back to server.
 // See event loggers at the end of this file.
 var log_message = function (type, msg, data) {
-    //if (type == 'debug') {
-    //    return;
-    //};
-    if (live && type == 'debug') {
+    if (!debug_output && type == 'debug') {
         return;
     }
     if (typeof data == 'undefined') {
@@ -134,7 +127,7 @@ var log_message = function (type, msg, data) {
     var logdata = {
         'message': msg
     };
-    if (live || test_log) {
+    if (live) {
         logdata.data = data;
         var logargs = {
             'activity_type': type,
@@ -155,7 +148,7 @@ var log_message = function (type, msg, data) {
             utils.dump(logdata);
         }
     }
-    if (!live || test_log) {
+    if (debug_output) {
         if (data.toString() != '{}') {
             logdata.data = data;
         }
@@ -179,7 +172,7 @@ var lifetime = casper.cli.options.lifetime;
 if (typeof lifetime != 'undefined' && lifetime > 0) {
     var lifetimer = setInterval(
         function () {
-            headless_exit(1, "Lifetime has expired.");
+            headless_err(1, "Lifetime has expired.", true);
         },
         lifetime * 60000);
 } else {
@@ -188,7 +181,7 @@ if (typeof lifetime != 'undefined' && lifetime > 0) {
 
 // Browser events
 // This is a mechanism to signal from browser to casper.
-// In the browser we log a console message with key text.  
+// In the browser we log a console message with key text.
 // Here, event code reads log messages looking for the key text
 // and sets a flag or increments a count when observed.
 var all_pages_done = false;
@@ -223,8 +216,7 @@ function waitForAllPagesDone() {
             return true;
         }
         return false;
-    }, null, null, 300000); // give it 5 min. to complete all pages.
-    //}, null, null, 3600000);    // give it an hour to complete all pages.
+    }, null, null, 600000); // give it 10 min. to complete all pages.
 }
 
 function waitForPageUpdate() {
@@ -239,9 +231,11 @@ function waitForPageUpdate() {
 }
 
 // Common exit function
-var headless_exit = function (val, msg) {
+var headless_err = function (val, msg, do_exit) {
     // exit 0 when assigned a null task (mission complete)
     // exit 1 when lifetime expires
+    // exit 2 when the client IP is temporarily blocked and forwarded to
+    //             '/DisclosureSearch/BotWarning.aspx'.
     // exit 11-19 for communication errors with skytruth
     // exit 21-29 for communication errors with fracfocusdata
     if (val > 1) {
@@ -249,172 +243,212 @@ var headless_exit = function (val, msg) {
     } else {
         msg_type = 'info';
     }
-    if (task_params) {
-        task_params.upload_success = upload_success;
-        task_params.upload_error = upload_error;
-        task_params.task_end_time = new Date().toString();
-        log_message("info", "Task interrupted.", task_params);
-    }
-    log_message(msg_type, 'Ending headless scraper execution.', {
-        'exit_status': val,
-        'exit_msg': msg,
-        'scrape_end_time': new Date().toString(),
-        'upload_success_total': upload_success_total,
-        'upload_error_total': upload_error_total,
-        'search_timeouts': timeout_count
-    });
+    if (do_exit) {
+        if (task_params) {
+            task_params.upload_success = upload_success;
+            task_params.upload_error = upload_error;
+            task_params.timeout_count = timeout_count;
+            task_params.task_end_time = new Date().toString();
+            log_message("info", "Task interrupted by error.", task_params);
+        }
+        log_message(msg_type, 'Ending headless scraper execution.', {
+            'exit_status': val,
+            'exit_msg': msg,
+            'scrape_end_time': new Date().toString(),
+            'upload_success_total': upload_success_total,
+            'upload_error_total': upload_error_total,
+            'timeout_count_total': timeout_count_total
+        });
 
-    casper.exit(val);
+        casper.exit(val);
+    }
 };
 
 // Static tasks for testing:
 var static_task = 0;
 var static_params = [
-    //{ state_name: "Florida",                                },   // No wells in state
-    //{ state_name: "Nebraska",                               },   // Single page state
-    //{ state_name: "Michigan",                               },   // Single page state
-    //{ state_name: "Alabama",                                },   // 3-page state
-    //{ state_name: "Alaska",                                 },   // 3-page state
-    //{ state_name: "Virginia",                               },   // 6-page state
-    { state_name: "Texas",        county_name: "Aransas"    }, // No wells in county
-    { state_name: "Oklahoma",     county_name: "Osage"      }, // Single page county
-    { state_name: "Colorado",     county_name: "Broomfield" }, // 2 page county
-    //{ state_name: "Colorado",     county_name: "Larimer"    },   // 3 page county
-    //{ state_name: "Pennsylvania", county_name: "Tioga"      },   // 17 page county
+    {
+        state_name: "Florida",
+    }, // void state
+    {
+        state_name: "Nebraska",
+    }, // 1 page state
+    {
+        state_name: "Michigan",
+    }, // 1 page state
+    {
+        state_name: "Alabama",
+    }, // 3-page state
+    {
+        state_name: "Alaska",
+    }, // 3-page state
+    {
+        state_name: "Virginia",
+    }, // 6-page state
+    {
+        state_name: "Texas",
+        county_name: "Aransas"
+    }, // void county
+    {
+        state_name: "Oklahoma",
+        county_name: "Osage"
+    }, // 1 page county
+    {
+        state_name: "Colorado",
+        county_name: "Broomfield"
+    }, // 2 page county
+    {
+        state_name: "Colorado",
+        county_name: "Larimer"
+    }, // 3 page county
+    {
+        state_name: "Pennsylvania",
+        county_name: "Tioga"
+    }, // 17 page county
     false
 ];
 
 var task_params;
 
-    function get_task() {
-        if (live || test_task) {
-            params = this.evaluate(function task(task_url) {
-                try {
-                    return JSON.parse(
-                        __utils__.sendAJAX(task_url, 'GET', null, false));
-                } catch (err) {
-                    return {
-                        'error': err
-                    };
-                }
-            }, fracbot_task_url);
-        } else {
-            params = static_params[static_task];
-            static_task += 1;
-        }
-        if (params) {
-            task_params = params;
-            params.task_start_time = new Date().toString();
-            params.lifetime = lifetime;
-            params.client = client_id;
-            params.proxy = proxy_ip;
-            if (params.error) {
-                var error = params.error;
-                params.error = params.error.message;
-                log_message("error", "Abort: Task ajax error.", error);
-                if (error.code == 101) {
-                    headless_exit(11, "AJAX NETWORK_ERR 101 on task request");
-                } else {
-                    headless_exit(12, "ERROR on task request");
-                }
+function get_task() {
+    if (!local_tasking) {
+        params = this.evaluate(function task(task_url) {
+            try {
+                return JSON.parse(
+                    __utils__.sendAJAX(task_url, 'GET', null, false));
+            } catch (err) {
+                return {
+                    'error': err
+                };
             }
-            if (params.county_name) {
-                log_message("info", "Task received: " + params.county_name +
-                    ", " + params.state_name, params);
+        }, fracbot_task_url);
+    } else {
+        params = static_params[static_task];
+        static_task += 1;
+    }
+    if (params) {
+        task_params = params;
+        params.task_start_time = new Date().toString();
+        params.lifetime = lifetime;
+        params.client = client_id;
+        params.proxy = proxy_ip;
+        if (params.error) {
+            var error = params.error;
+            params.error = params.error.message;
+            log_message("error", "Abort: Task ajax error.", error);
+            if (error.code == 101) {
+                headless_err(11, "AJAX NETWORK_ERR 101 on task request", true);
             } else {
-                log_message("info", "Task received: " + params.state_name,
-                    params);
+                headless_err(12, "ERROR on task request", true);
             }
         }
-        return params;
-    }
-
-    function scrape_page() {
-        if (live || test_update) {
-            log_message('debug', 'Passing search results to fracbot.');
-            this.evaluate(function all_pages() {
-                downloadAllPages(function finish_cb() {
-                    console.log("all_pages_done")
-                });
-            });
-
-            waitForAllPagesDone.call(this);
-            this.then(function () {
-                log_message('debug', 'Download complete.');
-            });
+        if (params.county_name) {
+            log_message("info", "Task received: " + params.county_name +
+                ", " + params.state_name, params);
         } else {
-            var rows = this.evaluate(function one_page() {
-                return parseRows();
-            });
-            utils.dump(rows);
+            log_message("info", "Task received: " + params.state_name,
+                params);
         }
     }
+    return params;
+}
 
-    function search_stacker(params) {
-        this.then(function state() {
-            state_num = this.getElementAttribute(
-                xpath("//select[@id='MainContent_cboStateList']/option[.='" +
-                    params.state_name + "']"), 'value');
-            log_message('debug', "Setting state to " + state_num);
-            params.state_api_num = state_num
-            //this.echo('Selecting state ' + params.state_name + " (" + state_num + ")");
-            this.evaluate(function set_state(state) {
-                jQuery("#MainContent_cboStateList").val(state);
-                jQuery("#MainContent_cboStateList").trigger("change");
-            }, state_num);
+function scrape_page() {
+    if (live) {
+        log_message('debug', 'Passing search results to fracbot.');
+        this.evaluate(function all_pages() {
+            downloadAllPages(function finish_cb() {
+                console.log("all_pages_done")
+            });
+        });
+        waitForAllPagesDone.call(this);
+        this.then(function () {
+            log_message('debug', 'Download complete.');
+        });
+    } else {
+        log_message('debug', 'Download skipped -- not live operation.');
+    }
+}
+
+function search_stacker(params) {
+    this.then(function state() {
+        state_num = this.getElementAttribute(
+            xpath("//select[@id='MainContent_cboStateList']/option[.='" +
+                params.state_name + "']"), 'value');
+        //log_message('debug', "Setting state to " + state_num);
+        params.state_api_num = state_num
+        this.evaluate(function set_state(state) {
+            jQuery("#MainContent_cboStateList").val(state);
+            jQuery("#MainContent_cboStateList").trigger("change");
+        }, state_num);
+    });
+
+    this.waitFor(function check_county() {
+        if (skip_task) {
+            return true;
+        }
+        return 'Choose a County' == this.getFormValues('form').ctl00$MainContent$cboCountyList;
+    });
+    this.then(function () {
+        if (skip_task) {
+            headless_err(22, "Error selecting state " + state_num, false);
+        } else {
+            log_message('debug', "State set to " + state_num);
+        }
+    });
+
+    if (!skip_task && params.county_name) {
+        this.then(function county() {
+            county_num = this.getElementAttribute(
+                xpath(
+                    "//select[@id='MainContent_cboCountyList']/option[.='" +
+                    params.county_name + "']"),
+                'value');
+            //log_message('debug', "Setting county to " + county_num);
+            params.county_api_num = county_num
+            this.evaluate(function set_county(county) {
+                jQuery("#MainContent_cboCountyList").val(county);
+                jQuery("#MainContent_cboCountyList").trigger(
+                    "change");
+            }, county_num);
         });
 
-        this.waitFor(function check_county() {
-            if (skip_task) { return true; }
-            return 'Choose a County' == this.getFormValues('form').ctl00$MainContent$cboCountyList;
+        this.waitFor(function check_well() {
+            if (skip_task) {
+                return true;
+            }
+            return 'Choose a Well Name' == this.getFormValues('form').ctl00$MainContent$cboWellNameList;
         });
         this.then(function () {
             if (skip_task) {
-                headless_exit(22, "Error selecting state " + state_num);
-            }
-            log_message('debug', "State set to " + state_num);
-        });
-
-        if (params.county_name) {
-            this.then(function county() {
-                county_num = this.getElementAttribute(
-                    xpath(
-                        "//select[@id='MainContent_cboCountyList']/option[.='" +
-                        params.county_name + "']"),
-                    'value');
-                log_message('debug', "Setting county to " + county_num);
-                params.county_api_num = county_num
-                //this.echo('Selecting county ' + params.county_name + ' (' + county_num + ')');
-                this.evaluate(function set_county(county) {
-                    jQuery("#MainContent_cboCountyList").val(county);
-                    jQuery("#MainContent_cboCountyList").trigger(
-                        "change");
-                }, county_num);
+                headless_err(23,
+                    "Error selecting county " + county_num, false);
+            } else {
                 log_message('debug', "County set to " + county_num);
-            });
+            }
+        });
+    }
 
-            this.waitFor(function check_well() {
-                if (skip_task) { return true; }
-                return 'Choose a Well Name' == this.getFormValues('form').ctl00$MainContent$cboWellNameList;
-            });
-            this.then(function () {
-                if (skip_task) { headless_exit(23, "Error on search request."); }
-            });
-        }
-
+    if (!skip_task) {
         this.then(function submit() {
             log_message('debug', "Submit search", params);
-            this.click(sel_search_btn);
+            this.click("#MainContent_btnSearch");
         });
 
         this.waitForUrl(results_url);
         this.then(function () {
-            if (skip_task) { headless_exit(24,
-                "Error when waiting for search results."); }
+            if (skip_task) {
+                headless_err(24,
+                    "Error when waiting for search results.", false);
+            }
         });
+    }
+    if (!skip_task) {
         waitForPageUpdate.call(this);
         this.then(function () {
-            if (skip_task) { headless_exit(13, "Error when updating pages."); }
+            if (skip_task) {
+                headless_err(13, "Error when updating pages.", true);
+            }
         });
 
         this.then(function scrape_pages() {
@@ -423,70 +457,59 @@ var task_params;
         });
         this.then(function () {
             if (skip_task) {
-                //headless_exit(14, "Error when scraping pages.");
-                // Continue on pdf scrape error.
+                // Continue scraping pdfs in event of a pdf timeout.
+                headless_err(14, "Error when scraping pages.", false);
                 skip_task = false;
             }
         });
     }
+}
 
-    function page_stacker() {
-        var page = this.getElementAttribute(sel_page_num, 'value');
-        log_message('debug', "page_stacker: stacking page " + (Number(page) + 1));
-        this.then(function request_page() {
-            this.click(sel_next_btn);
-        });
-        this.waitForSelectorTextChange(xpath(
-            "//input[@id='MainContent_GridView1_PageCurrent']/@value"));
-        this.then(function scrape_next() {
-            this.echo('Scraping next page');
-            scrape_page.call(this);
-        });
-    }
-
-    function scrape_loop() {
-        // Implements a recursive loop over assigned tasks in the fashion of
-        // https://github.com/n1k0/casperjs/blob/master/samples/dynamic.
-        if (!skip_task && !live && !test_update && this.exists(sel_next_btn)) {
-            // note: 'live' or 'test_update' implies use of downloadAllPages
-            //       so we don't page here.
-            this.start();
-            page_stacker.call(this);
-            //dump_steps.call(this, 'page stack');
+function scrape_loop() {
+    // Implements a recursive loop over assigned tasks in the fashion of
+    // https://github.com/n1k0/casperjs/blob/master/samples/dynamic.
+    // Finish old task
+    if (task_params) {
+        task_params.upload_success = upload_success;
+        task_params.upload_error = upload_error;
+        task_params.timeout_count = timeout_count;
+        task_params.task_end_time = new Date().toString();
+        if (skip_task) {
+            log_message("info", "Task failed -- scraping error.",
+                task_params);
+            task_params = null;
         } else {
-            // Finish old task
-            if (task_params) {
-                task_params.upload_success = upload_success;
-                task_params.upload_error = upload_error;
-                task_params.timeout_count = timeout_count;
-                task_params.task_end_time = new Date().toString();
-                if (skip_task) {
-                    log_message("info", "Task failed -- request timed out.",
-                        task_params);
-                    task_params = null;
-                } else {
-                    log_message("info", "Task complete", task_params);
-                    task_params = null;
-                }
-            }
-            // Start a new task
-            skip_task = false;
-            timeout_count = 0;
-            upload_success = 0;
-            upload_error = 0;
-            this.start(search_url);
-            if (skip_task) { headless_exit(21,
-                "Error on request for fracfocus search form."); }
-            task_params = get_task.call(this);
-            if (task_params) {
-                search_stacker.call(this, task_params);
-                //dump_steps.call(this, 'task stack');
-            } else {
-                headless_exit(0, "Null task assigned.");
-            }
+            log_message("info", "Task complete", task_params);
+            task_params = null;
         }
-        this.run(scrape_loop);
     }
+    // Start a new task
+    skip_task = false;
+    timeout_count = 0;
+    upload_success = 0;
+    upload_error = 0;
+    this.start(search_url);
+    if (skip_task) {
+        headless_err(21, "Error requesting fracfocus search form.", true);
+    }
+    this.then(function () {
+        var url = this.evaluate(function () {
+            return document.URL;
+        });
+        if (url == bot_warning_url) {
+            headless_err(2, "Forwarded to BotWarning page!", true);
+        }
+    });
+
+    task_params = get_task.call(this);
+    if (task_params) {
+        search_stacker.call(this, task_params);
+        //dump_steps.call(this, 'task stack');
+    } else {
+        headless_err(0, "Null task assigned.", true);
+    }
+    this.run(scrape_loop); // Note recurrsion through complete function.
+}
 
 casper.start();
 casper.then(function () {
