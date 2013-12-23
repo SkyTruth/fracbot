@@ -197,13 +197,15 @@ casper.on('remote.message', function on_msg(msg) {
     if (msg == 'page_is_updated') {
         page_is_updated = true;
     }
-    if (msg == 'pdf_upload_success') {
+    if (msg.substring(0,18) == 'pdf_upload_success') {
         upload_success += 1;
         upload_success_total += 1;
+        log_message('debug', msg);
     }
-    if (msg == 'pdf_upload_error') {
+    if (msg.substring(0,16) == 'pdf_upload_error') {
         upload_error += 1;
         upload_error_total += 1;
+        log_message('debug', msg);
     }
 });
 // The waitFor functions wrap the flag operations in a parameterless
@@ -267,44 +269,17 @@ var headless_err = function (val, msg, do_exit) {
 // Static tasks for testing:
 var static_task = 0;
 var static_params = [
-    {
-        state_name: "Florida",
-    }, // void state
-    {
-        state_name: "Nebraska",
-    }, // 1 page state
-    {
-        state_name: "Michigan",
-    }, // 1 page state
-    {
-        state_name: "Alabama",
-    }, // 3-page state
-    {
-        state_name: "Alaska",
-    }, // 3-page state
-    {
-        state_name: "Virginia",
-    }, // 6-page state
-    {
-        state_name: "Texas",
-        county_name: "Aransas"
-    }, // void county
-    {
-        state_name: "Oklahoma",
-        county_name: "Osage"
-    }, // 1 page county
-    {
-        state_name: "Colorado",
-        county_name: "Broomfield"
-    }, // 2 page county
-    {
-        state_name: "Colorado",
-        county_name: "Larimer"
-    }, // 3 page county
-    {
-        state_name: "Pennsylvania",
-        county_name: "Tioga"
-    }, // 17 page county
+    //{ state_name: "Florida" }, // void state
+    //{ state_name: "Nebraska" }, // 1 page state
+    //{ state_name: "Michigan" }, // 1 page state
+    //{ state_name: "Alabama" }, // 3-page state
+    //{ state_name: "Alaska" }, // 3-page state
+    //{ state_name: "Virginia" }, // 6-page state
+    //{ state_name: "Texas", county_name: "Aransas" }, // void county
+    //{ state_name: "Oklahoma", county_name: "Osage" }, // 1 page county
+    //{ state_name: "Colorado", county_name: "Broomfield" }, // 2 page county
+    { state_name: "Colorado", county_name: "Larimer" }, // 3 page county
+    //{ state_name: "Pennsylvania", county_name: "Tioga" }, // 17 page county
     false
 ];
 
@@ -358,7 +333,7 @@ function scrape_page() {
         log_message('debug', 'Passing search results to fracbot.');
         this.evaluate(function all_pages() {
             downloadAllPages(function finish_cb() {
-                console.log("all_pages_done")
+                console.log("all_pages_done");
             });
         });
         waitForAllPagesDone.call(this);
