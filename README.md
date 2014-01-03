@@ -162,26 +162,9 @@ There are two casperJS options and one FFheadless option involved.
 
 Some testing has been done with public proxy servers.  A list of servers
 can be downloaded from http://www.hidemyass.com/proxy-list/.  A automated 
-python driver for multiple proxy sites is included in the fracbot directory:
-
-    > cd ~/fracbot
-    > python proxy_driver.py --help
-    usage: proxy_driver.py [-h] [-v] [--scraper-lifetime SCRAPER_LIFETIME]
-                           [--job-lifetime JOB_LIFETIME]
-    
-    proxy_driver executes the fracbot headless-scrape.js scraper on a series 
-    of proxy servers determined by shuffling the list in proxy_list.py.
-    
-    optional arguments:
-      -h, --help            show this help message and exit
-      -v                    Enables debug output to log
-      --scraper-lifetime SCRAPER_LIFETIME
-                            Lifetime in minutes for each headless run.
-                            Each scraper run executes through a different 
-                            proxy server. Default is 0 for unlimited run.
-      --job-lifetime JOB_LIFETIME
-                            Lifetime in minutes for while job (all scraper 
-                            runs combined). Default is 0 for unlimited run.
+python driver, headless_driver.py (see below), has been included in the 
+fracbot directory.  It can execute automate the execution of the scraper 
+through one or more proxies.
 
 The file proxy_list.py contains proxies downloaded from hidemyass, but 
 since these sites change day to day it should be updated before using 
@@ -191,4 +174,48 @@ My experience was that very few sites supported the protocols needed
 by fracfocusdata.org and skytruth.org, and most jobs terminated in
 error, typically an AJAX error of some sort.
 
+The headless driver
+-------------------
 
+    > cd ~/fracbot
+    > python headless_driver.py --help
+    > python headless_driver.py  --help
+    usage: headless_driver.py [-h] [-v] [--scraper-lifetime SCRAPER_LIFETIME]
+                              [--tasklimit TASKLIMIT]
+                              [--proxy-mode {none,inorder,random,first}]
+                              [--job-lifetime JOB_LIFETIME]
+                              [--runlimit RUNLIMIT]
+                              [--runinterval RUNINTERVAL]
+    
+    headless_driver executes the fracbot headless-scrape.js scraper using 
+    command-line specified arguments. These can include scraper task and time 
+    limits and operation through one or more proxies specified in proxy_list.py.
+    The driver itself can be constrained by number of scraper runs and total 
+    elapsed time.
+    
+    optional arguments:
+      -h, --help            show this help message and exit
+      -v                    Enables debug output to log
+      --scraper-lifetime SCRAPER_LIFETIME
+                            Lifetime in minutes for each scraper run. Default
+                            is 0 for unlimited run time.
+      --tasklimit TASKLIMIT
+                            Number of scrape tasks to perform per scraper run.
+                            Default is 0 for unlimited tasks per run.
+      --proxy-mode {none,inorder,random,first}
+                            Route requests via proxy from proxy_list.py. Cycle
+                            through the proxy list to complete the specified
+                            number of runs. 'none': no proxy; 'inorder': use
+                            proxies in list order; 'random': randomize the proxy
+                            list; 'first': Use only the first proxy entry. 
+                            Default is 'none'.
+      --job-lifetime JOB_LIFETIME
+                            Lifetime in minutes for job (all scraper runs
+                            combined). Final run will complete before exit.
+                            Default is 0 for unlimited job time.
+      --runlimit RUNLIMIT   Number of scraper executions to perform. Default 
+                            is 0 for unlimited scrapes.
+      --runinterval RUNINTERVAL
+                            Number of seconds to wait between starting scraper
+                            runs. Default is 0.
+    
