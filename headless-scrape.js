@@ -178,6 +178,11 @@ if (typeof lifetime != 'undefined' && lifetime > 0) {
 } else {
     lifetime = 'unlimited';
 }
+var tasklimit = casper.cli.options.tasklimit;
+if (typeof tasklimit == 'undefined' || tasklimit <= 0) {
+    tasklimit == 1000000;
+}
+var taskcount = 0;
 
 // Browser events
 // This is a mechanism to signal from browser to casper.
@@ -236,11 +241,12 @@ function waitForPageUpdate() {
 var headless_err = function (val, msg, do_exit) {
     // exit 0 when assigned a null task (mission complete)
     // exit 1 when lifetime expires
-    // exit 2 when the client IP is temporarily blocked and forwarded to
+    // exit 2 when taskcount reaches tasklimit
+    // exit 5 when the client IP is temporarily blocked and forwarded to
     //             '/DisclosureSearch/BotWarning.aspx'.
     // exit 11-19 for communication errors with skytruth
     // exit 21-29 for communication errors with fracfocusdata
-    if (val > 1) {
+    if (val > 4) {
         msg_type = 'error';
     } else {
         msg_type = 'info';
@@ -257,6 +263,7 @@ var headless_err = function (val, msg, do_exit) {
             'exit_status': val,
             'exit_msg': msg,
             'scrape_end_time': new Date().toString(),
+            'searches_performed': taskcount,
             'upload_success_total': upload_success_total,
             'upload_error_total': upload_error_total,
             'timeout_count_total': timeout_count_total
@@ -459,10 +466,15 @@ function scrape_loop() {
         }
     }
     // Start a new task
+    task_params = false
     skip_task = false;
     timeout_count = 0;
     upload_success = 0;
     upload_error = 0;
+    if (taskcount >= tasklimit) {
+        headless_err(2, "Task count reaches limit ("+tasklimit+").", true);
+    }
+    taskcount += 1;
     this.start(search_url);
     if (skip_task) {
         headless_err(21, "Error requesting fracfocus search form.", true);
@@ -472,7 +484,7 @@ function scrape_loop() {
             return document.URL;
         });
         if (url == bot_warning_url) {
-            headless_err(2, "Forwarded to BotWarning page!", true);
+            headless_err(5, "Forwarded to BotWarning page!", true);
         }
     });
 
