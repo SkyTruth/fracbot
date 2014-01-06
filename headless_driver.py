@@ -58,7 +58,12 @@ def run_scraper(lifetime=0, tasklimit=0, proxy_addr=None, proxy_type=None):
     # Fire off a job and wait for results.
     if verbose:
         print "Scraper command:", cmd
-    log = subprocess.check_output(cmd.split(), stderr=subprocess.STDOUT)
+    try:
+        log = subprocess.check_output(cmd.split(), stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as e:
+        # This occcurs when the program exits with non-zero status.
+        # Fracbot uses non-zero status frequenty, but no cause to quit.
+        log = e.output
     if verbose:
         print "Scraper log:", log
     status = get_exit_status(log)
