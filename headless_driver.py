@@ -40,8 +40,8 @@ def expire_job():
 
 def run_scraper(lifetime=0, tasklimit=0, proxy_addr=None, proxy_type=None):
     if proxy_addr:
-        proxy1 = "--proxy={}:{} {} "
-        proxy2 = "--ip={}:{} "
+        proxy1 = "--proxy={} {} ".format(proxy_addr, proxy_type)
+        proxy2 = "--ip={} ".format(proxy_addr)
     else:
         proxy1 = ""
         proxy2 = ""
@@ -58,7 +58,7 @@ def run_scraper(lifetime=0, tasklimit=0, proxy_addr=None, proxy_type=None):
     # Fire off a job and wait for results.
     if verbose:
         print "Scraper command:", cmd
-    log = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+    log = subprocess.check_output(cmd.split(), stderr=subprocess.STDOUT)
     if verbose:
         print "Scraper log:", log
     status = get_exit_status(log)
