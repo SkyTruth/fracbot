@@ -187,7 +187,7 @@ def main():
             delay = (start_time + runinterval) - current_time
             if delay > 0.:
                 time.sleep(delay)
-        start_time = current_time
+        start_time = time.time()
 
         # Implement proxy routing.
         if proxy_mode == 'none':
