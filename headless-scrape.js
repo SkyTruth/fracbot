@@ -14,7 +14,8 @@ var local_tasking = false; // Use internal array of tasks (for debug)
 // URLs
 var fracbot_url = "http://ewn4.skytruth.org/fracbot/";
 var fracbot_js_url = fracbot_url + 'fracbot.user.js';
-var fracbot_task_url = fracbot_url + 'task';
+//var fracbot_task_url = fracbot_url + 'task';
+var fracbot_task_url = fracbot_url + 'task2';
 var fracbot_log_url = fracbot_url + 'client-log';
 var search_url =
     'http://www.fracfocusdata.org/DisclosureSearch/StandardSearch.aspx';
@@ -106,6 +107,14 @@ casper.on("page.error", function (msg, trace) {
     log_message("error", logmsg, logdata);
     skip_task = true;
 });
+
+//casper.on('waitFor.timeout', function (timeout, details) {
+//        log_message('error', 'Error: Request timeout after '+timeout+'ms.', data=details);
+//        timeout_count += 1;
+//        timeout_count_total += 1;
+//        skip_task = true;
+//        wait(10000);
+//});
 
 // debug routine, dump the stacked casper steps
 function dump_steps(msg) {
@@ -345,7 +354,11 @@ function scrape_page() {
         });
         waitForAllPagesDone.call(this);
         this.then(function () {
-            log_message('debug', 'Download complete.');
+            if (skip_task) {
+                headless_err(14, "Timeout while scraping pages.", false);
+            } else {
+                log_message('debug', 'Download complete.');
+            }
         });
     } else {
         log_message('debug', 'Download skipped -- not live operation.');
@@ -354,11 +367,14 @@ function scrape_page() {
 
 function search_stacker(params) {
     this.then(function state() {
-        state_num = this.getElementAttribute(
-            xpath("//select[@id='MainContent_cboStateList']/option[.='" +
-                params.state_name + "']"), 'value');
+        state_num = params.state_code;
+        if (typeof state_num == 'undefined') {
+            state_num = this.getElementAttribute(
+                xpath("//select[@id='MainContent_cboStateList']/option[.='" +
+                    params.state_name + "']"), 'value');
+        }
         //log_message('debug', "Setting state to " + state_num);
-        params.state_api_num = state_num
+        params.state_api_num = state_num;
         this.evaluate(function set_state(state) {
             jQuery("#MainContent_cboStateList").val(state);
             jQuery("#MainContent_cboStateList").trigger("change");
@@ -369,7 +385,11 @@ function search_stacker(params) {
         if (skip_task) {
             return true;
         }
-        return 'Choose a County' == this.getFormValues('form').ctl00$MainContent$cboCountyList;
+        if (this.exists('#MainContent_cboCountyList')) {
+            return 'Choose a County' == this.getFormValues('form').ctl00$MainContent$cboCountyList;
+        } else {
+            return false;
+        }
     });
     this.then(function () {
         if (skip_task) {
@@ -379,27 +399,36 @@ function search_stacker(params) {
         }
     });
 
-    if (!skip_task && params.county_name) {
+    if (params.county_name) {
         this.then(function county() {
-            county_num = this.getElementAttribute(
-                xpath(
-                    "//select[@id='MainContent_cboCountyList']/option[.='" +
-                    params.county_name + "']"),
-                'value');
-            //log_message('debug', "Setting county to " + county_num);
-            params.county_api_num = county_num
-            this.evaluate(function set_county(county) {
-                jQuery("#MainContent_cboCountyList").val(county);
-                jQuery("#MainContent_cboCountyList").trigger(
-                    "change");
-            }, county_num);
+            if (!skip_task) {
+                county_num = params.county_code;
+                if (typeof county_num == 'undefined') {
+                    county_num = this.getElementAttribute(
+                        xpath(
+                            "//select[@id='MainContent_cboCountyList']/option[.='" +
+                            params.county_name + "']"),
+                        'value');
+                }
+                //log_message('debug', "Setting county to " + county_num);
+                params.county_api_num = county_num
+                this.evaluate(function set_county(county) {
+                    jQuery("#MainContent_cboCountyList").val(county);
+                    jQuery("#MainContent_cboCountyList").trigger(
+                        "change");
+                }, county_num);
+            }
         });
 
         this.waitFor(function check_well() {
             if (skip_task) {
                 return true;
             }
-            return 'Choose a Well Name' == this.getFormValues('form').ctl00$MainContent$cboWellNameList;
+            if (this.exists('MainContent_cboWellNameList')) {
+                return 'Choose a Well Name' == this.getFormValues('form').ctl00$MainContent$cboWellNameList;
+            } else {
+                return false;
+            }
         });
         this.then(function () {
             if (skip_task) {
@@ -411,40 +440,28 @@ function search_stacker(params) {
         });
     }
 
-    if (!skip_task) {
-        this.then(function submit() {
+    this.then(function submit() {
+        if (!skip_task) {
             log_message('debug', "Submit search", params);
             this.click("#MainContent_btnSearch");
-        });
-
-        this.waitForUrl(results_url);
-        this.then(function () {
+            this.waitForUrl(results_url);
             if (skip_task) {
                 headless_err(24,
                     "Error when waiting for search results.", false);
+            } else {
+                waitForPageUpdate.call(this);
+                if (skip_task) {
+                    headless_err(13, "Error when updating pages.", true);
+                }
             }
-        });
-    }
-    if (!skip_task) {
-        waitForPageUpdate.call(this);
-        this.then(function () {
-            if (skip_task) {
-                headless_err(13, "Error when updating pages.", true);
-            }
-        });
-
-        this.then(function scrape_pages() {
-            //this.echo('Scraping pages');
-            scrape_page.call(this);
-        });
-        this.then(function () {
-            if (skip_task) {
-                // Continue scraping pdfs in event of a pdf timeout.
-                headless_err(14, "Error when scraping pages.", false);
-                skip_task = false;
-            }
-        });
-    }
+        }
+        if (!skip_task) {
+            this.then(function scrape_pages() {
+                //this.echo('Scraping pages');
+                scrape_page.call(this);
+            });
+        }
+    });
 }
 
 function scrape_loop() {
@@ -503,6 +520,7 @@ casper.then(function () {
     log_message("info", "Starting headless scraper execution.", {
         "scrape_start_time": new Date().toString(),
         "scraper_lifetime": lifetime.toString() + " minutes",
+        "scraper_tasklimit": tasklimit,
         "proxy": proxy_ip
     });
 });
