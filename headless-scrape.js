@@ -479,6 +479,7 @@ function scrape_loop() {
             task_params = null;
         } else {
             log_message("info", "Task complete", task_params);
+            log_message("event", "Fracbot client event", {"event":"TASKOK", "key":task_params.seqid})
             task_params = null;
         }
     }

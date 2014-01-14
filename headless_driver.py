@@ -23,6 +23,7 @@ import threading
 
 # GLOBALS
 job_timeout = False
+bot_warning_received = False
 verbose = False
 
 def get_exit_status(log):
@@ -32,6 +33,10 @@ def get_exit_status(log):
     i1 = i0 + 15
     i2 = log.find(',', i1)
     status = int(log[i1:i2])
+
+    if status == 5:
+        global bot_warning_received
+        bot_warning_received = True
     return status
 
 def expire_job():
@@ -180,7 +185,10 @@ def main():
 
     start_time = None
 
-    while runcount < runlimit and not job_timeout:
+    while (runcount < runlimit and 
+           not job_timeout and
+           not bot_warning_received
+          ):
         # Implement runinterval
         current_time = time.time()
         if start_time:
@@ -211,6 +219,9 @@ def main():
         elif runcount >= runlimit:
             print ("headless_driver exiting -- run limit ({}) reached."
                    .format(runlimit))
+        elif bot_warning_received:
+            print ("headless_driver exiting -- "
+                   "BotWarning page received from FracFocus.")
         else:
             print "headless_driver exiting -- ?"
 
