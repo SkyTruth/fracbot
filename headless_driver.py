@@ -213,15 +213,15 @@ def main():
         run_scraper(scraperlife, tasklimit, proxy_addr, proxy_type)
 
     if verbose:
-        if job_timeout:
+        if bot_warning_received:
+            print ("headless_driver exiting -- "
+                   "BotWarning page received from FracFocus.")
+        elif job_timeout:
             print ("headless_driver exiting -- job lifetime ({}) expired."
                    .format(joblife))
         elif runcount >= runlimit:
             print ("headless_driver exiting -- run limit ({}) reached."
                    .format(runlimit))
-        elif bot_warning_received:
-            print ("headless_driver exiting -- "
-                   "BotWarning page received from FracFocus.")
         else:
             print "headless_driver exiting -- ?"
 
