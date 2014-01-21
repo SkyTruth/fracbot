@@ -6,8 +6,8 @@
 
 // Configuration flags
 // Production configuration is live=true, others=false.
-var live = true; // Post log and pdfs to fracbot server
-var debug_output = true; // Produces more logging records.
+var live = true;           // Post log and pdfs to fracbot server
+var debug_output = true;   // Produces more logging records.
 var local_fracbot = false; // Use local copy of fracbot.js (for debug)
 var local_tasking = false; // Use internal array of tasks (for debug)
 
@@ -61,7 +61,7 @@ var casper = require('casper').create({
     remoteScripts: remoteScripts,
     clientScripts: clientScripts,
     pageSettings: {
-        'userAgent': 'Mozilla/5.0 (Windows NT 6.1; rv:25.0) Gecko/20100101 Firefox/25.0',
+        'userAgent': '',
         'localToRemoteUrlAccessEnabled': true
     }
 });
@@ -285,17 +285,11 @@ var headless_err = function (val, msg, do_exit) {
 // Static tasks for testing:
 var static_task = 0;
 var static_params = [
-    //{ state_name: "Florida" }, // void state
-    //{ state_name: "Nebraska" }, // 1 page state
-    //{ state_name: "Michigan" }, // 1 page state
-    //{ state_name: "Alabama" }, // 3-page state
-    //{ state_name: "Alaska" }, // 3-page state
-    //{ state_name: "Virginia" }, // 6-page state
-    //{ state_name: "Texas", county_name: "Aransas" }, // void county
-    //{ state_name: "Oklahoma", county_name: "Osage" }, // 1 page county
-    //{ state_name: "Colorado", county_name: "Broomfield" }, // 2 page county
-    { state_name: "Colorado", county_name: "Larimer" }, // 3 page county
-    //{ state_name: "Pennsylvania", county_name: "Tioga" }, // 17 page county
+    { state_name: "Florida", state_code: '9', seqid: 9016  }, // void state
+    { state_name: "Texas", state_code: '42',
+      county_name: "Runnels", county_code: '399',
+      seqid: 11974
+    },
     false
 ];
 
@@ -346,13 +340,15 @@ function get_task() {
 
 function scrape_page() {
     if (live) {
-        log_message('debug', 'Passing search results to fracbot.');
-        this.evaluate(function all_pages() {
-            downloadAllPages(function finish_cb() {
-                console.log("all_pages_done");
+        this.then(function () {
+            log_message('debug', 'Passing search results to fracbot.');
+            this.evaluate(function all_pages() {
+                downloadAllPages(function finish_cb() {
+                    console.log("all_pages_done");
+                });
             });
+            waitForAllPagesDone.call(this);
         });
-        waitForAllPagesDone.call(this);
         this.then(function () {
             if (skip_task) {
                 headless_err(14, "Timeout while scraping pages.", false);
@@ -411,11 +407,10 @@ function search_stacker(params) {
                         'value');
                 }
                 //log_message('debug', "Setting county to " + county_num);
-                params.county_api_num = county_num
+                params.county_api_num = county_num;
                 this.evaluate(function set_county(county) {
                     jQuery("#MainContent_cboCountyList").val(county);
-                    jQuery("#MainContent_cboCountyList").trigger(
-                        "change");
+                    jQuery("#MainContent_cboCountyList").trigger("change");
                 }, county_num);
             }
         });
@@ -424,7 +419,7 @@ function search_stacker(params) {
             if (skip_task) {
                 return true;
             }
-            if (this.exists('MainContent_cboWellNameList')) {
+            if (this.exists('#MainContent_cboWellNameList')) {
                 return 'Choose a Well Name' == this.getFormValues('form').ctl00$MainContent$cboWellNameList;
             } else {
                 return false;
@@ -445,21 +440,22 @@ function search_stacker(params) {
             log_message('debug', "Submit search", params);
             this.click("#MainContent_btnSearch");
             this.waitForUrl(results_url);
-            if (skip_task) {
-                headless_err(24,
-                    "Error when waiting for search results.", false);
-            } else {
-                waitForPageUpdate.call(this);
-                if (skip_task) {
-                    headless_err(13, "Error when updating pages.", true);
-                }
-            }
         }
-        if (!skip_task) {
-            this.then(function scrape_pages() {
-                //this.echo('Scraping pages');
+    });
+    this.then(function results() {
+        if (skip_task) {
+            headless_err(24,
+                "Error when waiting for search results.", false);
+        } else {
+            if (this.exists("#MainContent_GridView1 tr:nth-child(2)")) {
+                waitForPageUpdate.call(this);
                 scrape_page.call(this);
-            });
+            } else {
+                log_message('debug', "Search produces no results.");
+            }
+            if (skip_task) {
+                headless_err(13, "Error when updating pages.", true);
+            }
         }
     });
 }
@@ -479,7 +475,7 @@ function scrape_loop() {
             task_params = null;
         } else {
             log_message("info", "Task complete", task_params);
-            log_message("event", "Fracbot client event", {"event":"TASKOK", "key":task_params.seqid})
+            log_message("fracbot_event", "TASKOK event", {"event":"TASKOK", "key":task_params.seqid});
             task_params = null;
         }
     }

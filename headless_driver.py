@@ -192,7 +192,9 @@ def main():
         # Implement runinterval
         current_time = time.time()
         if start_time:
-            delay = (start_time + runinterval) - current_time
+            # randomize interval to look more 'human'.
+            interval = (random.random() + 0.5) * runinterval
+            delay = (start_time + interval) - current_time
             if delay > 0.:
                 time.sleep(delay)
         start_time = time.time()
