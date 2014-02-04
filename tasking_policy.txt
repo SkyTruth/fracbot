@@ -1,0 +1,136 @@
+Fracbot Tasking Upgrade 
+
+Current capability
+==================
+Currently we task only by county.  The county record in 
+appomatic_fracbotserver_county serves to store 'scrapepoints' which is used
+to make tasking decisions.  This value is increased when new wells are detected 
+and is decreased when the county is searched.  There may be other system 
+functions that modify the value, such as increasing it over time, but I am 
+not aware of these.
+
+Limitations of the current tasking and scraping system that I would like 
+to address include:
+    1.  It can only task searches by county.
+    2.  Downloading PDFs is directly tied to searching for PDFs.
+
+These limitations constrain the way the scraper clients interact with the
+fracfocusdata.org site.
+
+Proposed changes
+================
+To provide greater flexibility in the way searches and downloads are 
+conducted, I propose first that we expand the range of search parameters 
+to include APIs for directly requesting a particular well, and to allow 
+both full State searches (no County parameter) and qualified County searches 
+(eg, county name plus producer). 
+
+Second, I propose that we divide the scraping task between 'discovery' where
+we search and store new records (as determined by api/job_start), and 'data 
+acquisition' where we request and download targeted PDFs.  
+
+Tasking
+-------
+Tasking is performed when the client accesses the /get_task api endpoint. 
+The json object returned contains State and County names.  From the client 
+side, changing tasking involves returning an object with different members,
+either without a county name or with a county name and additional members
+for producer or whatever.  Since the headless scraper is the only client 
+of get_task, the changes do not have wider repercussions.
+
+headless-scrape is currently capable of handling full state searches.  If 
+there is no county name in the task it simply does not modify that field 
+of the search form.  If we add additional parameters, then their presence
+would similarly cause further information to be select or placed into 
+the search form.
+
+On the server side, this tasking would force us to abandon County as a 
+source of tasks, opting instead for a separate task table.  This table 
+would have fields for all possible search parameters but would allow 
+some combinations to be null.  Options could include State, State/County, 
+State/County/Producer, State/Produces or even just Producer.  Whatever 
+is present goes into the get_task response object and ultimately into the 
+search form.
+
+The task table would also store information needed to prioritize tasking.  
+Tasking priority is based on how recently the task was searched and how
+frequently the task produces new records.  Thefore it would need to 
+store date_last_searched and something like a record count.  The record 
+count could be simply a database count of records meeting the criteria 
+or the count of new records the task has produced in the last 90 days. 
+The latter could be supported by adding the search_task_seqid to the 
+FFScrape record.  Since there is already a scraped date in that record
+we can then count records produced by a task in a given period.
+
+The task priority from 0 to 1.0 can be set with an algorithm like this:
+    age = time since last search;
+    activity_90day = number of new records the task discovered in last 90 days;
+    max_90day = max if all tasks activity_90day
+    if age < 7 days: priority = 0
+    else if age >= 30 days: priority = 1
+    else:
+        age_priority = (age - 7) / (30 - 7)
+        activity_priority = activity_90day / max(activity_90day)
+        priority = max(age_priority, activity_priority)
+
+Discover and acquire
+--------------------
+Separating the scraping operation into a discover and acquire parts increases
+our flexibility with respect to how we load the FracFocus server.  Policy 
+options could range from what we have now, that is discover and immediately
+acquire every new pdf, to completely separate, only discover when searching
+and then separately task the PDF acquisitions.  It also allows intermediate 
+policies such as discover, then acquire up to 6 PDF immediately, leaving 
+the rest for explicit download by api number.  Slightly more involved would 
+be a policy of, for example, a cycle of one search and 6 PDF downloads.  If 
+the search produced more than 6 new records, download 6 and leave the rest.
+If it produces less than 6, download those and then make up the difference
+with waiting API tasks.  The hope is that if we find the right policy 
+that compliments the Frac Focus bot detection policy, we can have our 
+clients stay busy and not get blocked.
+
+To provide this capability, on the client side we need to add API and a 
+task parameter.  The client need not distinguish discover and acquire.  
+It simply executes the search as described in the parameters, and the 
+uploads the PDFs of records that come back in from the check_records call.  
+This means the policy is completely on the server side and can be changed
+at any time.
+
+The servers life is a little more complicated.  Both the get_task and 
+check_records api calls are involved in implementing policy.  get_task 
+should be able to switch between discover tasks (search tasks described
+above) and acquire tasks.  Acquire tasks come from a search of the 
+FFScrape table for records of known api/jobdate but without a downloaded
+PDF (more discusson on this below).  It would implement the policy regarding
+how to mix discovery and acquisition.  At lease three modes are contemplated
+including immediate acquire (as we have now), full segregation where a client
+only gets discover tasks or acquire tasks, or some form of interleaved tasking
+such as a search followed by some number of acquires. 
+
+check_records would control when PDFs were requested from the Frac Focus site
+and uploaded.  It would need to know whether the task was discover or acquire.
+It would deduce this when it received 1 row or a small number of rows all 
+with the same API and where at least one record was in the FFScrape table
+without a downloaded API.  (Sounds complicated but I think it will be fairly
+easy).  Acquire tasks are always returned as a download request.  Discover 
+tasks would be policy dependent.  Immediate or segregated policies would be
+simple, either request all new PDFs or none respectively.  To implement a
+policy of limited downloads from a search we might need to have the client
+maintain and forward a count of downloaded PDFs if we don't want that state
+maintained in the server.  Either way when the count is reached we stop 
+downloading and let the FFScrape table accumulate discovered PDFs that 
+are yet to be downloaded.
+
+To extract acquire tasks from the FFScrape table requires additional data 
+fields:  PDF upload_status, date of last_upload_attempt, and count of 
+upload_attempts.  Acquire tasks would be selected from among FFScrape 
+records with pdf_status of 'unacquired', and prioritized based on length 
+of time since last upload attempt and fewer attempted uploads.
+
+Finally, we could add a low priority re-acquire task list for PDFs that 
+are acquired and are over a given age, eg, 1yr.  The re-acquire would 
+request the upload by api and would compare the prior PDF to the current 
+one.  If any changes have occurred, parse and store the new PDF.  There 
+remains the question of how to deal with the old PDF.  Keep it as historical
+record or delete it as obsolete.  Not to be 
+

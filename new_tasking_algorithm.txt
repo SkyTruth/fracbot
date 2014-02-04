@@ -1,0 +1,97 @@
+Discover/Acquire tasking algorithm proposal
+
+Headless scraper
+    A new tasking capability is added to allow specifying the api.  This
+    will go to the api field of the request form and select frac records
+    for just one well.  An api value implies the state and county fields
+    are null.
+
+Fracbot server
+    When frac report records are scraped they are checked against our database
+    to find those that are new.  To 'discover' is to execute a state/county 
+    search and determine the new PDFs.
+    
+    The discovered PDFs may be immediately requested requested for download
+    or they may be saved for later downloading.  This is the current
+    fracbot behavior.
+
+    If the pdf is not downloaded, a new task type, the 'api-task', will be 
+    added to the FracFocusTask table.  This stores the api so that downloading
+    can be requested at a later time.
+
+    A task sequence is a state/county task (discovery with possible downloads)
+    followed by zero or more api-tasks (download of a specific frac record).
+    A session variable named 'pdf_count' will store a count of downloads 
+    for a task sequence.
+
+    Two parameters, MIN_PDFS_PER_TASK and MAX_PDFS_PER_TASK, will control 
+    pdf downloading and use of state/county tasks vs api-tasks.
+
+    When processing a state/county task, request pdfs immediately until 
+    pdf_count reaches MAX or there are no more PDFs.
+
+    When a state/county task is complete, assign api-tasks until 
+    pdf_count reaches 'MIN'.
+
+    Always reset pdf_count when a new state/county task is assigned.
+
+    See table for parameter value results.
+
+           MIN                     MIN                     MIN
+           zero                    small                   huge
+           --------------------    --------------------    --------------------
+    MAX    Discover                Cycle:                  Discover one time
+    zero   continuously            Discover                w/o downloads.
+           w/o downloads.          w/o downloads.          Api-tasks thereafter.
+           No api-tasks.           Limited api-tasks.     
+
+    MAX    Cycle:                  Cycle:                  Discover one time,
+    small  Dicover,                Dicover,                download some new.
+           download some new.      download some new.      Api-tasks thereafter.
+           No api-tasks.           Limited api-tasks.      
+
+    MAX    Cycle:                  Cycle:                  Discover one time,
+    huge   Discover                Discover                downloads all new.
+           download all new.       download all new.       Api-tasks thereafter.
+           No api-tasks.           Limited api-tasks.      
+
+    NOTE: If MIN>MAX, then every task sequence will have some api-tasks.
+
+FracFocusTask gets new field
+    api              request pdf by api.
+
+headless-scrape:
+    Implement the api task request by filling in the api field of the 
+    FracFocus search form.  Other than that everything in the browser
+    proceeds as it does now. 
+
+views.py
+
+    pdf_count:
+    An HttpRequest.session value named 'pdf_count' will store pdf downloads 
+    for a task sequence.  A task sequence is a state/county task followed by
+    zero or more api-tasks.  (This is conditional on the session feature 
+    is activated. Alternatively, some sort of cookie value will be used.)
+    When frac report records are scraped and checked against our database,
+    those that are new may be requested.  When they are, the pdf_count
+    value is incremented for each requested pdf.  If the pdf is not 
+    downloaded immediately, a api-task is created in the FFTask table.
+
+    check_record() line ~145:
+    Setting 'pdf_content' to a false value constitutes a pdf download request.
+    Therefore, we check the current pdf_count for the task and load a dummy 
+    value when MAX is reached.  The api will not be downloaded, so we 
+    will put an api-task record into the FFTask table for this row.
+
+    If the state/county comes up again before the api-task is assigned,
+    we need to clear the task record.
+    Generally, we need to delete or deactivate api task records after they 
+    are downloaded either as an api-task or as part of a subsequent 
+    state/county task.  Possibly clear all api tasks matching the api_prefix
+    of a state/county task before assigning that task.
+
+    get_task():
+    If pdf_count < min, assign an api-task.  This will incriment the pdf_count.
+    Otherwise, select the next state/county task; clear the pdf_count
+    and possibly clear api-task records (by api_prefix) for that state/county.
+

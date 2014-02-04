@@ -1,0 +1,185 @@
+
+Analysis of fracbotserver workflow for tasking, requesting, and parsing PDFs
+
+Fracbotserver Workflow
+======================
+This is a summary of the fracbotserver workflow with respect to tasking 
+searches, checking search results, and requesting and parsing the pdf files.
+For each of the four primary functions involved, there follows a short
+narative description and a distilled pseudo-code version of the logic.
+Referenced source code is in the django_tools project under 
+appomatic_fracbotserver.
+
+
+    views.py get_task() @286
+    ------------------------
+    get_task() is called by the headless scraper client code to see which
+    fracfocus search to conduct.  The bulk of the task selection algorithm
+    is in the SQL of a single query, below, which I don't fully understand.
+    It seems to be a weighted random selection based on the county's 
+    'scrapepoints' value.  The scrapepoints value is incremented when the
+    county is scraped and a new pdf shows up.  It is diminished by 10% each
+    time the county is scraped.  There may be other code that modifies 
+    scrapepoints, particularly, something that increments it over time, but
+    I do not know of any.
+
+    get_task()
+        # The tasking algorithm is contained in this SQL statement
+        cur.execute("""
+            with rand as 
+                (select random() * 
+                    (select sum(scrapepoints) 
+                        from appomatic_fracbotserver_county
+                    ) as rand
+                ),
+            counties as
+                (select *, sum(scrapepoints) 
+                    over (order by id) randpos
+                    from appomatic_fracbotserver_county
+                )
+            select r.rand, c.randpos, 
+                    c.id as county_id, s.id as state_id, 
+                    c.name as county_name, s.name as state_name
+            from counties c
+                join rand r 
+                    on r.rand >= c.randpos
+                join appomatic_fracbotserver_state s 
+                    on c.state_id = s.id
+            order by c.randpos desc
+            limit 1;
+            """)
+        task = selected record
+        set fracbotserver.County.scrapepoints = scrapepoints * 0.9
+        return task
+
+
+    views.py check_records(request) @152
+    ------------------------------------
+    check_records() is called by the fracbot client app after a search results
+    page is received, to inform it of which pdfs to be requested and uploaded
+    to fracbotserver.  The call contains all the rows from one page of search
+    results.  This is also used indirectly by headless when it calls into
+    the fracbot code.  This routine relies on check_record (below) to do the
+    heavy lifting.
+    The key data is row.event_guuid, which, if null when returned from
+    check_record(), indicates that we want to upload the pdf.
+
+    check_records(request)
+        # fracbotserver api endpoint for client check of pdfs to upload
+        # returns a list of rows with pdf's to upload
+        for each row in request (from search results page):
+            check_record(row)  #  see below
+            if not row.event_guuid:
+                new_rows.append(row)
+        return new_rows (to client)
+
+
+    views.py check_record(row) @95
+    ------------------------------
+    check_record() gets all the available information based on the api/date.
+    It returns the argument row augmented with current status information.
+    Task selection variable fracbotserver.County.scrapepoints is incremented 
+    when a new FFScrape record is created.
+    The key event_guuid value is retrieved from the siteinfo.Event table.
+
+    check_record(row)
+        # called by check_records call from fracbot client
+        # called by parse_pdf (twice) to check/update before/after parsing
+        retrieve seqid from FFScrape by row.api+row.jobdate
+        if found: 
+            set row.pdf_seqid to FFScrape.seqid
+        if row.pdf_seqid is null:
+            create FFScrape record
+            set row.pdf_seqid to FFScrape.seqid
+            create BotTaskStatus NEW record
+            increment scrapepoints in fracbotserver.County table
+        retrieve * from FFReport record by row.pdf_seqid
+        if FFReport record found:
+            set row.pdf_content to FFReport record
+        if api in siteinfo.Well table
+            set row.well_guuid & row.site_guuid
+            if row.well+row.jobdate in siteinfo.Event table
+                set row.event_guuid
+        if operator_guuid not in record
+            lookup row.operator in siteinfo.CompanyAliases table
+            if found: set row.operator_guuid
+        return row
+
+
+    views.py parse_pdf(row) @177
+    ----------------------------
+    parse_pdf() receives the pdf data from the fracbot client app and 
+    parses it into FFReport and FFReportChemical tables.  All data from 
+    one pdf is tied together by the pdf_seqid which is the FFScrape.seqid
+    primary key value.
+    If a FFReport record was found matching the pdf_seqid then the pdf
+    is not parsed.
+    The entire parsing process including insertion of all FFReport and 
+    FFReportChemical records is wrapped in a try statement and is either
+    rolled back on exception, or committed on successful completion.
+    The final statement calles a function called 
+    appomatic_siteinfo.management.commands.fracscrapeimport.scrapetoevent()
+    which may create an siteinfo.Event record used in check_records() above.
+    It does not appear that the raw pdf data is permanently stored.
+
+        parse_pdf(row)
+            # fracbotserver api endpoint for client upload of pdf file
+            # 'row' is a search result line
+            check_record(row)
+            if row.pdf_content (from FFReport):
+                return row
+            try:
+                pdf = fracfocustools.FracFocusPDFParser(pdf_data).parse_pdf()
+                if not PDF: Exception()
+                generate and insert FFReport record
+                for each chemical:
+                    generate and insert FFReportChemical record
+                insert into BotTaskStatus:
+                    DONE record for FracFocusReport
+                    DONE record for FracFocusPDFDownloader
+                    DONE record for FracFocusPDFParser
+            except:
+                cursor rollback
+            else:
+                cursor commit
+            update siteinfo 
+            # recheck and return lasest status of row
+            check_record(row)
+            return row
+
+Commentary
+==========
+
+    In pdf_update, it looks like the update of FFReport and 
+    FFReportChemical are properly transactioned in all operations
+    complete or they are all rolled back.  This assumes that any 
+    problem results in an exception and the exception is not 
+    caught, but there is no indication otherwise.
+
+    Since the existance of a FFReport record causes the parsing
+    to be canceled, the current code will not be able to reparse
+    a PDF which may be a newer or more complete version of the data
+    posted by FracFocus.  If at some point we do wnat to periodically 
+    reparse pdfs to catch updated postings, we will have to change this,
+    but we will also have to consider how to handle the pdf data.  Do we
+    update existing FFR/FFRC records, delete and replace them, or enter
+    a parallel set of records?  
+
+    pdf_update does not appear to store the pdf itself.  It parses
+    the pdf and stores it data in the FFR and FFRC tables.  We may 
+    want to save the pdfs so that a parsing improvement can be 
+    retro-applied to old pdfs.
+
+    It appears that there may be some risk in using siteinfo.Event 
+    to determine if the pdf needs to be uploaded.  This is the 
+    arrangement between check_rows() and check_row().  If only FracFocus 
+    api/jobdate is stored there, then we are OK.  However, if for 
+    example PA permit activity is also stored there, then it is quite 
+    possible that a permit action takes place on the same day as 
+    fracking job starts.  That could indicate that the fracking pdf has 
+    been recorded when it has not.  Using 'pdf_content' would be a 
+    more direct detection of a processed PDF.  It would, however, 
+    permit a 'bad' pdf, one that produces any sort of parsing error, 
+    to be requested, uploaded and parsed repeatedly whenever the 
+    county was tasked.
+
