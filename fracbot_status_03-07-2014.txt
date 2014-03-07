@@ -1,0 +1,93 @@
+    Summary of FracBot scraping system status, March 7, 2014
+
+    Existing documents
+    ------------------
+    In https://github.com/SkyTruth/fracbot/
+        fracbotserver_workflow.txt
+            A walk through the server code relevant to tasking and recording
+            results of fracbot.js.  This is under old tasking (get_task).
+            See email to Paul, below for new tasking (get_task2).  This
+            makes changes in the tasking, but little else.
+        tasking_policy.txt
+            A long range roadmap proposal for how scraping with fracbot
+            can be managed.  Had a major influence on the new tasking
+            (FracFocusTask table and get_task2 endpoint).
+        new_tasking_algorithm.txt
+            A proposal to extend task2 capability further in direction
+            of the tasking_policy document.
+        README.md
+            Installation instructions for fracbot client site.
+
+    The current task2 & FracFocusTask algorithm
+    -----------------------------------------
+    From an email to Paul, January 21, 2014:
+    Hi Paul,
+    I have the new tasking working with the headless scraper.
+    The new tasking follows this algorithm.
+    The table FracFocusTask contains all tasks.  It has state and county ids
+    per task as well as state-only tasks.  There is a date last scraped column
+    and a records column that stores how many PDFs were scraped from this task
+    in a given prior period (currently set to 1 year).
+
+    A score column is set by a routine runs daily.  It first counts and sets
+    the records column in the table and get the highest value as maxrecords.
+
+    The score is set by these rules:
+        0 if scraped in last 7 days,
+        1 if scraped more than 30 days ago, else
+          greater of records/maxrecords, age(scraped)/30
+
+    Then for all tasks which have a records value of '0' the score is reduced
+    (currently, by 10%) so that producing tasks are prioritized.
+    This has greatest effect when there are many tasks with a score of 1.
+
+    Tasking selects the highest score task.  If multiple tasks have the same
+    high score, then a random selection is made.
+    When a task runs, the score is set to -1 so it won't be selected by
+    another task request.  Then when the task reports successful completion
+    the score is set to 0.  If the scoring routine finds a task with a score
+    of -1, this indicates a failed task so it set it to 1 to try again. If it
+    should find the currently running task and set it to 1, the score will be
+    set to '0' when the task completes or left at 1 if it fails.
+
+    I introduced a random factor into all waits between downloads, pages,
+    and tasks so that the activity does not appear as automated.
+
+    I ran a test yesterday starting a little after 9:00pm.  It was the usual
+    100/24 task.  It got a BotWarning page a little after 7:00 this morning. 
+    I wonder if this was when the crew came into work and check their
+    bot-detector.  Anyway, the results of the 10+ hr test run are here:
+    ...
+
+    Deployment requirements
+    -----------------------
+    Python 2.7
+    This should be installed from python.org and is very straight forward.
+    Any conflicts with existing environment can be resolved with virtualenv.
+
+    Casper and Phantom installed.
+    Not considering any licensing issues, these can be distributed by us
+    as binaries rather than downloaded in the client environment.
+
+    For installation details, see
+        https://github.com/SkyTruth/fracbot/blob/master/README.md
+
+    Random Notes
+    ------------
+    FracFocusTask now drives the headless scraper through a new
+    fracbotserver endpoint named 'get_task2'.  This task server uses the
+    above tasking algorithm to select tasks from FracFocusTask table.
+
+    FracFocusTask table has tasks for all states as states and for all
+    counties of all states, however not all tasks are active.  There is
+    a task_flag field that is 1 for active tasks and 0 for inactive ones.
+    Currently there are 10 states that are tasked by county so for these
+    the state task is inactive.  Conversely, for the 40 states tasked as
+    states the state's county tasks are inactive. To switch a state from
+    state mode to county mode or vice-versa is a matter of stitching all
+    flags with a given state value to the value desired for the county
+    records, then switching the state record to the alternate state.
+
+    The api_prefix field reflects either the state or state-county part
+    of the API.  It is used to count pdf's associated with the given task.
+
